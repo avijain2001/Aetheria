@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#06090c">
+<meta name="description" content="Aetheria — an India-first living view of the world, continuously verified and understood.">
+<title>Aetheria — Know what matters.</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/" aria-label="Aetheria home"><span class="mark"><i></i></span><span class="brand-copy"><strong>AETHERIA</strong><small><b>Know what matters.</b><span> before you go looking.</span></small></span></a>
+  <div class="search-shell" id="searchShell"><span class="search-icon">⌕</span><input id="search" placeholder="Search the world…" autocomplete="off" aria-label="Search news" inputmode="search"><kbd>/</kbd><button id="clearSearch" class="search-clear" aria-label="Clear search">×</button><div id="searchSuggestions" class="search-suggestions" hidden></div></div>
+  <div class="actions"><button class="status-btn" id="systemBtn" aria-label="Open source status"><i id="liveDot"></i><span id="liveLabel">STARTING</span></button><button class="icon-btn" id="refresh" aria-label="Refresh">↻</button><button class="icon-btn" id="theme" aria-label="Change theme">◐</button></div>
+</header>
+<section id="flashRail" class="flash-rail" hidden aria-live="polite"><div class="flash-label"><i></i><span>FLASH</span><small id="flashCount">0</small></div><div id="flashList" class="flash-list"></div></section>
+<div class="ticker"><span class="ticker-label"><i></i>INDIA NOW</span><span id="editionDate" class="ticker-date">—</span><button id="tickerBtn" class="ticker-story">Waiting for verified reports…</button><time id="clock">—</time></div>
+
+<main class="page">
+  <section class="front-intro">
+    <div><span class="section-kicker">INDIA FIRST · WORLD AWARE</span><h1 id="viewTitle">What matters right now</h1></div>
+    <div class="front-tools">
+      <button class="tool-link" id="radarBtn"><span>RADAR</span><b id="radarCount">0</b></button>
+      <button class="tool-link" id="inboxBtn"><span>INBOX</span><b id="inboxCount">0</b></button>
+      <button class="tool-link" id="replayBtn"><span>REPLAY</span></button>
+    </div>
+  </section>
+
+  <section id="homeView" class="home-view">
+    <section class="lead-zone">
+      <div class="zone-label"><span>01</span><b>TOP NEWS</b><i></i><em>WHAT MATTERS NOW</em></div>
+      <div class="lead-layout">
+        <div class="stack-wrap">
+          <div class="stack-label"><span>STORY STACK</span><small id="stackCount">—</small></div>
+          <div id="storyStack" class="story-stack"></div>
+          <div class="stack-controls"><button class="stack-btn" id="stackPrev" aria-label="Previous story">‹</button><span id="stackPosition">0 / 0</span><div id="stackDots" class="stack-dots"></div><button class="stack-btn" id="stackNext" aria-label="Next story">›</button></div>
+          <div id="stackInsight" class="stack-insight"></div>
+          <article id="stackAnalysis" class="stack-analysis"></article>
+        </div>
+        <aside class="india-now-panel">
+          <div class="panel-title"><span>INDIA NOW</span><em id="indiaNowCount">—</em></div>
+          <div id="happeningList" class="happening-list"></div>
+          <aside class="market-pulse" id="marketPulse"><div class="market-head"><span>INDIA MARKET PULSE</span><em id="marketObservedLabel">Observed</em></div><div id="marketGroups" class="market-groups"></div></aside>
+        </aside>
+      </div>
+    </section>
+
+    <section id="returnStrip" class="return-strip" hidden><div><span class="return-kicker">SINCE YOU WERE AWAY</span><b id="returnTitle">—</b></div><div id="returnList" class="return-list"></div></section>
+
+    <section class="explore-row">
+      <div class="explore-label"><span>EXPLORE</span><b>Choose a desk</b></div>
+      <nav id="topics" class="topics" aria-label="News categories"></nav>
+    </section>
+
+    <section class="insight-grid">
+      <article class="insight-card india"><div class="panel-title"><span>INDIA LENS</span><em>What matters to India</em></div><div id="indiaList" class="insight-list"></div></article>
+      <article class="insight-card impact"><div class="panel-title"><span>IMPACT</span><em>What could matter next</em></div><div id="impactList" class="insight-list"></div></article>
+    </section>
+
+    <section class="aether-intel-rail">
+      <div class="aether-intel-label"><span>AETHERIA INTELLIGENCE</span><em id="aiModeLabel">OBSERVED SIGNAL</em></div>
+      <div class="aether-intel-main"><div id="aiPulse" class="ai-pulse"></div><div id="pressureList" class="pressure-list"></div></div>
+    </section>
+
+    <section class="latest-zone">
+      <div class="zone-label"><span>02</span><b>LATEST</b><i></i><em>CHRONOLOGICAL</em></div>
+      <div class="latest-head"><div><h2>What just happened</h2><p>Fresh event activity, with Aetheria analysis available on every story.</p></div><div class="depth-switch" id="depthSwitch"><button data-depth="5">BRIEF</button><button data-depth="14" class="active">NORMAL</button><button data-depth="30">DEEP</button></div></div>
+      <div class="latest-layout"><div class="latest-main"><div id="feed" class="feed"></div><button id="loadMore" class="text-btn more-btn">Load more</button></div><aside class="read-next-panel"><div class="panel-title"><span>READ NEXT</span><em id="readNextCount">—</em></div><div id="readNextList" class="read-next-list"></div></aside></div>
+    </section>
+
+    <section class="early-zone"><div class="zone-label"><span>03</span><b>EARLY SIGNALS</b><i></i><em>DISCOVERY, NOT PREDICTION</em></div><div id="emergingList" class="emerging-list"></div></section>
+
+    <section class="next-zone"><div class="zone-label"><span>04</span><b>NEXT</b><i></i><em>WATCH WHAT'S MOVING</em></div><div class="next-layout"><article class="next-item"><span>NOW MOVING</span><div id="nowContext"></div></article><article class="next-item"><span>ON THE CALENDAR</span><div id="nextContext"></div></article></div></section>
+
+    <section class="desk-zone"><div class="zone-label"><span>05</span><b>DESKS</b><i></i><em>GO DEEPER</em></div><div id="deskGrid" class="desk-grid"></div></section>
+  </section>
+
+  <section id="searchView" class="search-view" hidden><div class="search-head"><span class="section-kicker">SEARCH</span><h2 id="searchTitle">Results</h2></div><div id="searchResults" class="search-results"></div></section>
+</main>
+
+<div id="storyModal" class="modal" aria-hidden="true"><div class="modal-backdrop" id="modalBackdrop"></div><section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <button id="modalClose" class="modal-close" aria-label="Close">×</button><div id="modalKicker" class="modal-kicker">LIVING STORY</div><h2 id="modalTitle">—</h2><div id="modalPublished" class="modal-published">—</div>
+  <div id="modalEvidence" class="evidence-panel"></div><div id="modalContext" class="context-grid"></div><p id="modalSummary" class="modal-summary">—</p><div id="modalPersonal" class="personal-relevance"></div>
+  <div id="readingMemory" class="reading-memory" hidden></div>
+  <div class="knowledge-gap" id="knowledgeGap"><div><span>KNOWLEDGE BRIDGE</span><b>Before you go deeper</b></div><button id="knowledgeBtn" class="inline-action">Give me the missing context</button><div id="knowledgeGapBody" hidden></div></div>
+  <div id="modalAi" class="ai-box" hidden></div>
+  <div id="modalImpact" class="detail-block"></div><div id="modalTimeline" class="detail-block"></div><div id="modalRelated" class="detail-block"></div><div id="modalFuture" class="detail-block"></div>
+  <div class="modal-divider"></div><div class="modal-sources-head"><span>SHOW THE EVIDENCE</span><span id="modalSourceCount"></span></div><div id="modalSources" class="modal-sources"></div>
+</section></div>
+
+<div id="radarDrawer" class="drawer" aria-hidden="true"><div class="drawer-backdrop" id="radarBackdrop"></div><aside class="drawer-panel"><div class="drawer-head"><div><span class="section-kicker">NEWS RADAR</span><h2>Watch what matters</h2></div><button id="radarClose" class="close-btn">×</button></div><div class="radar-add"><input id="radarInput" placeholder="e.g. India's EV industry"><button id="radarAddBtn" class="inline-action">Watch</button></div><div id="radarList" class="radar-list"></div><p class="drawer-note">Aetheria checks your saved topics against live, verified events and only adds meaningful new developments to the inbox.</p></aside></div>
+
+<div id="inboxDrawer" class="drawer" aria-hidden="true"><div class="drawer-backdrop" id="inboxBackdrop"></div><aside class="drawer-panel"><div class="drawer-head"><div><span class="section-kicker">NEWS INBOX</span><h2>Since you were away</h2></div><button id="inboxClose" class="close-btn">×</button></div><div id="inboxList" class="inbox-list"></div><button id="clearInbox" class="text-btn">Clear inbox</button></aside></div>
+
+<div id="replayModal" class="modal" aria-hidden="true"><div class="modal-backdrop" id="replayBackdrop"></div><section class="modal-panel replay-panel" role="dialog" aria-modal="true"><button id="replayClose" class="modal-close">×</button><div class="modal-kicker">NEWS REPLAY</div><h2>What did the world look like?</h2><div class="replay-controls"><input type="date" id="replayDate"><button id="replayRun" class="inline-action">Replay this day</button></div><div id="replaySummary" class="replay-summary"></div><div id="replayList" class="replay-list"></div></section></div>
+
+<div id="systemDrawer" class="drawer" aria-hidden="true"><div class="drawer-backdrop" id="drawerBackdrop"></div><aside class="drawer-panel"><div class="drawer-head"><div><span class="section-kicker">AETHERIA SYSTEM</span><h2>Source health</h2></div><button id="drawerClose" class="close-btn">×</button></div><div class="system-summary"><div><b id="onlineCount">—</b><span>online</span></div><div><b id="checkingCount">—</b><span>checking</span></div><div><b id="errorCount">—</b><span>errors</span></div></div><div class="system-diagnostics"><div><span>feed</span><b id="feedState">—</b></div><div><span>discovery</span><b id="discoveryState">—</b></div><div><span>intelligence</span><b id="intelligenceState">—</b></div></div><div class="drawer-section"><div class="panel-title"><span>SOURCES</span><span id="sourceRatio">—</span></div><div id="sourceList" class="source-list"></div></div></aside></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script src="/app.js"></script>
+</body>
+</html>
