@@ -5814,23 +5814,6 @@
     "discovered_from": "https://www.hindustantimes.com/rss"
   },
   {
-    "name": "India Today · 6-283612389-1x1.png",
-    "provider": "India Today",
-    "url": "https://akm-img-a-in.tosshub.com/indiatoday/images/story/202609/6-283612389-1x1.png?VersionId=gcie8v_Ts_rN9VRSSp9ehzZeNs5oGekj",
-    "topic": "India",
-    "tier": "publisher",
-    "format": "rss",
-    "interval_sec": 300,
-    "max_items": 150,
-    "enabled": true,
-    "language": "en",
-    "country": "IN",
-    "region": "IN",
-    "city": "",
-    "state_name": "",
-    "discovered_from": "https://www.indiatoday.in/rss"
-  },
-  {
     "name": "India Today · Cover Story",
     "provider": "India Today",
     "url": "https://www.indiatoday.in/rss/1206509",
@@ -6100,6 +6083,23 @@
     "region": "IN",
     "city": "",
     "state_name": "",
+    "discovered_from": "https://www.indiatoday.in/rss"
+  },
+  {
+    "name": "India Today · tamil-nadu-cm-joseph-vijay-and-actor-dhanush-292718382-3x4.jpg",
+    "provider": "India Today",
+    "url": "https://akm-img-a-in.tosshub.com/indiatoday/images/story/202609/tamil-nadu-cm-joseph-vijay-and-actor-dhanush-292718382-3x4.jpg?VersionId=7q8oTDOTF8yEu0z6RSSN44.04KcRkcUR",
+    "topic": "Entertainment",
+    "tier": "publisher",
+    "format": "rss",
+    "interval_sec": 300,
+    "max_items": 150,
+    "enabled": true,
+    "language": "en",
+    "country": "IN",
+    "region": "IN",
+    "city": "",
+    "state_name": "Tamil Nadu",
     "discovered_from": "https://www.indiatoday.in/rss"
   },
   {

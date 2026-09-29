@@ -110,7 +110,8 @@ class DatabaseConnection:
         )
 
         # Replace '?' parameter placeholders with '%s' for PostgreSQL
-        # We do this carefully so we don't replace '?' inside literal quotes
+        # We do this carefully so we don't replace '?' inside literal quotes,
+        # and escape any existing '%' in the query as '%%' so psycopg2 doesn't misinterpret them
         parts = []
         in_single_quote = False
         in_double_quote = False
@@ -123,6 +124,8 @@ class DatabaseConnection:
                 parts.append(ch)
             elif ch == '?' and not in_single_quote and not in_double_quote:
                 parts.append('%s')
+            elif ch == '%':
+                parts.append('%%')
             else:
                 parts.append(ch)
         q = "".join(parts)
@@ -154,7 +157,10 @@ class DatabaseConnection:
 
         if self.is_postgres:
             cur = self._conn.cursor()
-            cur.execute(sql, tuple(params))
+            if params:
+                cur.execute(sql, tuple(params))
+            else:
+                cur.execute(sql.replace("%%", "%"))
             return PostgresCursorWrapper(cur)
         else:
             return self._conn.execute(sql, tuple(params))

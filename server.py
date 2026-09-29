@@ -176,11 +176,11 @@ def now() -> float:
 
 
 def db():
-    return get_db(DB_FILE, timeout=3.0)
+    return get_db(DB_FILE, timeout=5.0)
 
 
 def db_read():
-    return get_db(DB_FILE, timeout=0.8, query_only=True)
+    return get_db(DB_FILE, timeout=5.0, query_only=True)
 
 
 def ensure_column(con, table, column, definition):
@@ -1256,19 +1256,25 @@ def build_enriched():
         for i in range(0, len(ids), chunk_size):
             chunk_ids=ids[i:i+chunk_size]
             marks=",".join("?" for _ in chunk_ids)
-            chunk_meta=con.execute(f"""SELECT ea.event_id,
-                MAX(CASE WHEN a.id=e.primary_article_id THEN a.canonical_url END) primary_url,
-                MAX(CASE WHEN a.id=e.primary_article_id THEN a.domain END) primary_domain,
-                MAX(CASE WHEN a.id=e.primary_article_id THEN a.image_url END) image_url,
-                MAX(CASE WHEN a.id=e.primary_article_id THEN a.published END) published,
-                MAX(CASE WHEN a.id=e.primary_article_id THEN a.description END) description,
-                GROUP_CONCAT(DISTINCT a.domain) domains,
-                GROUP_CONCAT(DISTINCT a.language) languages,
-                GROUP_CONCAT(DISTINCT a.country) countries
-              FROM event_articles ea JOIN articles a ON a.id=ea.article_id JOIN events e ON e.id=ea.event_id
-              WHERE ea.event_id IN ({marks}) GROUP BY ea.event_id""",chunk_ids).fetchall()
-            meta.extend(chunk_meta)
-        learn=con.execute("SELECT key,value,observations FROM learning WHERE key LIKE 'topic_open_rate:%'").fetchall()
+            try:
+                chunk_meta=con.execute(f"""SELECT ea.event_id,
+                    MAX(CASE WHEN a.id=e.primary_article_id THEN a.canonical_url END) primary_url,
+                    MAX(CASE WHEN a.id=e.primary_article_id THEN a.domain END) primary_domain,
+                    MAX(CASE WHEN a.id=e.primary_article_id THEN a.image_url END) image_url,
+                    MAX(CASE WHEN a.id=e.primary_article_id THEN a.published END) published,
+                    MAX(CASE WHEN a.id=e.primary_article_id THEN a.description END) description,
+                    GROUP_CONCAT(DISTINCT a.domain) domains,
+                    GROUP_CONCAT(DISTINCT a.language) languages,
+                    GROUP_CONCAT(DISTINCT a.country) countries
+                  FROM event_articles ea JOIN articles a ON a.id=ea.article_id JOIN events e ON e.id=ea.event_id
+                  WHERE ea.event_id IN ({marks}) GROUP BY ea.event_id, e.id, e.primary_article_id""",chunk_ids).fetchall()
+                meta.extend(chunk_meta)
+            except Exception as meta_exc:
+                print(f"[Aetheria build_enriched meta warning] {type(meta_exc).__name__}: {str(meta_exc)[:180]}", flush=True)
+        try:
+            learn=con.execute("SELECT key,value,observations FROM learning WHERE key LIKE 'topic_open_rate:%'").fetchall()
+        except Exception:
+            learn=[]
     except Exception as exc:
         print(f"[Aetheria build_enriched warning] {type(exc).__name__}: {str(exc)[:180]}", flush=True)
         return []
@@ -2033,7 +2039,7 @@ def search_events(query,limit=60):
           MAX(CASE WHEN a.id=e.primary_article_id THEN a.published END) published,
           MAX(CASE WHEN a.id=e.primary_article_id THEN a.description END) description,
           GROUP_CONCAT(DISTINCT a.domain) domains, GROUP_CONCAT(DISTINCT a.language) languages
-        FROM event_articles ea JOIN articles a ON a.id=ea.article_id JOIN events e ON e.id=ea.event_id WHERE ea.event_id IN ({marks}) GROUP BY ea.event_id""",ids).fetchall()
+        FROM event_articles ea JOIN articles a ON a.id=ea.article_id JOIN events e ON e.id=ea.event_id WHERE ea.event_id IN ({marks}) GROUP BY ea.event_id, e.id, e.primary_article_id""",ids).fetchall()
     except Exception:
         return []
     finally:
@@ -2127,7 +2133,7 @@ def replay_day(date_str, limit=160):
               GROUP_CONCAT(DISTINCT a.domain) domains,
               GROUP_CONCAT(DISTINCT a.language) languages
             FROM event_articles ea JOIN articles a ON a.id=ea.article_id JOIN events e ON e.id=ea.event_id
-            WHERE ea.event_id IN ({marks}) GROUP BY ea.event_id""",ids).fetchall()
+            WHERE ea.event_id IN ({marks}) GROUP BY ea.event_id, e.id, e.primary_article_id""",ids).fetchall()
             meta_map={r["event_id"]:r for r in mrows}
         events=[_serialize_event(dict(r),meta_map) for r in rows]
         # Preserve chronology and add a compact activity bucket for the UI.
