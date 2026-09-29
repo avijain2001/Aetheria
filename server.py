@@ -1462,27 +1462,45 @@ def refresh_market(force=False):
         if not force and MARKET_CACHE.get("at") and t-MARKET_CACHE["at"]<MARKET_POLL_SECONDS:
             return MARKET_CACHE
     groups=[]
-    # Each provider is isolated; unavailable groups are explicit rather than synthetic.
-    idx=[]
-    for sym,label in (("^NSEI","NIFTY 50"),("^BSESN","SENSEX"),("^NSEBANK","NIFTY BANK")):
+    # 1. India Key Indices
+    india_idx=[]
+    for sym,label in (("^NSEI","NIFTY 50"),("^BSESN","SENSEX"),("^NSEBANK","NIFTY BANK"),("^CNXIT","NIFTY IT")):
         try:
-            q=_yahoo_quote(sym); q["label"]=label; idx.append(q)
+            q=_yahoo_quote(sym); q["label"]=label; india_idx.append(q)
         except Exception as exc:
-            idx.append({"label":label,"symbol":sym,"available":False,"error":str(exc)[:120]})
+            india_idx.append({"label":label,"symbol":sym,"available":False,"error":str(exc)[:120]})
+
+    # 2. International & Global Indices
+    global_idx=[]
+    for sym,label in (("^GSPC","S&P 500"),("^IXIC","NASDAQ"),("^DJI","DOW JONES"),("^N225","NIKKEI 225"),("^FTSE","FTSE 100")):
+        try:
+            q=_yahoo_quote(sym); q["label"]=label; global_idx.append(q)
+        except Exception as exc:
+            global_idx.append({"label":label,"symbol":sym,"available":False,"error":str(exc)[:120]})
+
+    # 3. Currencies (INR Pairs)
     fx=[]
     try:
         fx=_frankfurter_rates()
     except Exception as exc:
         fx=[{"label":"INR FX","available":False,"error":str(exc)[:120]}]
-    bull=[]
+
+    # 4. Bullion & Commodities
+    commodities=[]
     try:
-        bull=_bullion_prices()
+        commodities=_bullion_prices()
     except Exception as exc:
-        bull=[{"label":"Bullion","available":False,"error":str(exc)[:120]}]
+        commodities=[{"label":"Bullion","available":False,"error":str(exc)[:120]}]
+    try:
+        oil=_yahoo_quote("BZ=F"); oil["label"]="Brent Crude"; oil["symbol"]="Brent Crude"; commodities.append(oil)
+    except Exception:
+        pass
+
     groups=[
-        {"id":"indices","label":"INDICES","source":"Yahoo Finance · latest observed","items":idx},
-        {"id":"currency","label":"CURRENCY","source":"Live market quote when available · ECB reference otherwise","items":fx},
-        {"id":"bullion","label":"BULLION","source":"Public quote/futures source · latest observed","items":bull},
+        {"id":"india","label":"INDIA","source":"NSE / BSE · latest observed","items":india_idx},
+        {"id":"global","label":"GLOBAL","source":"US & Global Exchanges · latest observed","items":global_idx},
+        {"id":"currency","label":"CURRENCY","source":"Live INR quote when available","items":fx},
+        {"id":"commodities","label":"COMMODITIES","source":"Global Futures · Bullion & Energy","items":commodities},
     ]
     available=sum(1 for g in groups if any(i.get("available",True) and i.get("price") is not None for i in g["items"]))
     cache={"at":t,"status":"live" if available else "unavailable","updated_iso":datetime.fromtimestamp(t,timezone.utc).isoformat(),"groups":groups}
