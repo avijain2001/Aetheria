@@ -23,6 +23,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from db_adapter import get_db, UniversalRow
 
 # AETHERIA CORE V22.2 — WORLD UNDERSTOOD / INDIA-FIRST INTELLIGENCE
 # Principles:
@@ -175,23 +176,21 @@ def now() -> float:
 
 
 def db():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_FILE, timeout=3, check_same_thread=False)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA busy_timeout=2500")
-    return con
+    return get_db(DB_FILE, timeout=3.0)
 
 
 def db_read():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_FILE, timeout=0.8, check_same_thread=False)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA busy_timeout=800")
-    con.execute("PRAGMA query_only=1")
-    return con
+    return get_db(DB_FILE, timeout=0.8, query_only=True)
 
 
 def ensure_column(con, table, column, definition):
+    if getattr(con, "is_postgres", False):
+        try:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}")
+            con.commit()
+        except Exception:
+            pass
+        return
     cols = {r[1] for r in con.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in cols:
         con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
@@ -1352,9 +1351,7 @@ def future_watch(limit=18, force=False):
         if not force and FUTURE_CACHE["at"] and t-FUTURE_CACHE["at"] < FUTURE_CACHE_SECONDS:
             return list(FUTURE_CACHE["value"])[:limit]
     try:
-        con=sqlite3.connect(DB_FILE,timeout=.35,check_same_thread=False)
-        con.row_factory=sqlite3.Row
-        con.execute("PRAGMA busy_timeout=350")
+        con=db_read()
         rows=con.execute(
             "SELECT * FROM schedules WHERE start_ts>=? AND start_ts<=? "
             "ORDER BY start_ts ASC, importance DESC LIMIT 80",(t,t+30*86400)
@@ -1526,8 +1523,7 @@ def related_events(eid,limit=6):
     # Read-only contextual lookup. Ranking favours shared entities/title terms,
     # then topic and time proximity; broad category matches alone are insufficient.
     try:
-        con=sqlite3.connect(DB_FILE,timeout=.35,check_same_thread=False); con.row_factory=sqlite3.Row
-        con.execute("PRAGMA busy_timeout=350")
+        con=db_read()
         e=con.execute("SELECT * FROM events WHERE id=?",(eid,)).fetchone()
         if not e: con.close(); return []
         rows=con.execute(
@@ -1785,8 +1781,7 @@ def system_state(force=False):
             return STATE_CACHE["value"]
     con=None
     try:
-        con=sqlite3.connect(DB_FILE,timeout=.35,check_same_thread=False); con.row_factory=sqlite3.Row
-        con.execute("PRAGMA busy_timeout=350"); t=now()
+        con=db_read(); t=now()
         ev=con.execute("SELECT COUNT(*) FROM events WHERE last_seen>?",(t-86400,)).fetchone()[0]
         ev48=con.execute("SELECT COUNT(*) FROM events WHERE last_seen>?",(t-2*86400,)).fetchone()[0]
         sig=con.execute("SELECT COUNT(*) FROM events WHERE last_seen>? AND significance>=0.55",(t-86400,)).fetchone()[0]
@@ -1821,11 +1816,10 @@ def system_state(force=False):
 def source_status():
     con=None
     try:
-        con=sqlite3.connect(DB_FILE,timeout=.35,check_same_thread=False); con.row_factory=sqlite3.Row
-        con.execute("PRAGMA busy_timeout=350")
+        con=db_read()
         rows=con.execute("SELECT id,name,provider,url,tier,max_items,last_success,last_failure,failures,items,reliability,interval_sec,enabled,state,last_attempt,last_duration_ms,last_error,language,country,region,city,state_name,discovered_from FROM sources WHERE enabled=1 ORDER BY CASE tier WHEN 'official' THEN 0 WHEN 'publisher' THEN 1 ELSE 2 END,name").fetchall()
         return [dict(r) for r in rows]
-    except sqlite3.OperationalError:
+    except Exception:
         return []
     finally:
         if con: con.close()
