@@ -7,16 +7,26 @@
 <meta name="description" content="Aetheria — an India-first living view of the world, continuously verified and understood.">
 <title>Aetheria — Know what matters.</title>
 <link rel="manifest" href="/manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="/" aria-label="Aetheria home"><span class="mark"><i></i></span><span class="brand-copy"><strong>AETHERIA</strong><small><b>Know what matters.</b><span> before you go looking.</span></small></span></a>
+  <a class="brand" href="/" id="brandHome" aria-label="Aetheria home"><span class="mark"><i></i></span><span class="brand-copy"><strong>AETHERIA</strong><small><b>Know what matters.</b><span> before you go looking.</span></small></span></a>
   <div class="search-shell" id="searchShell"><span class="search-icon">⌕</span><input id="search" placeholder="Search the world…" autocomplete="off" aria-label="Search news" inputmode="search"><kbd>/</kbd><button id="clearSearch" class="search-clear" aria-label="Clear search">×</button><div id="searchSuggestions" class="search-suggestions" hidden></div></div>
   <div class="actions"><button class="status-btn" id="systemBtn" aria-label="Open source status"><i id="liveDot"></i><span id="liveLabel">STARTING</span></button><button class="icon-btn" id="refresh" aria-label="Refresh">↻</button><button class="icon-btn" id="theme" aria-label="Change theme">◐</button></div>
 </header>
 <section id="flashRail" class="flash-rail" hidden aria-live="polite"><div class="flash-label"><i></i><span>FLASH</span><small id="flashCount">0</small></div><div id="flashList" class="flash-list"></div></section>
 <div class="ticker"><span class="ticker-label"><i></i>INDIA NOW</span><span id="editionDate" class="ticker-date">—</span><button id="tickerBtn" class="ticker-story">Waiting for verified reports…</button><time id="clock">—</time></div>
+
+<!-- V24: Top-level category navigation -->
+<nav class="category-bar" id="categoryBar">
+  <div class="category-bar-inner">
+    <div id="topics" class="topics" aria-label="News categories"></div>
+  </div>
+</nav>
 
 <main class="page">
   <section class="front-intro">
@@ -42,17 +52,19 @@
         <aside class="india-now-panel">
           <div class="panel-title"><span>INDIA NOW</span><em id="indiaNowCount">—</em></div>
           <div id="happeningList" class="happening-list"></div>
-          <aside class="market-pulse" id="marketPulse"><div class="market-head"><span>INDIA MARKET PULSE</span><em id="marketObservedLabel">Observed</em></div><div id="marketGroups" class="market-groups"></div></aside>
         </aside>
       </div>
     </section>
 
-    <section id="returnStrip" class="return-strip" hidden><div><span class="return-kicker">SINCE YOU WERE AWAY</span><b id="returnTitle">—</b></div><div id="returnList" class="return-list"></div></section>
-
-    <section class="explore-row">
-      <div class="explore-label"><span>EXPLORE</span><b>Choose a desk</b></div>
-      <nav id="topics" class="topics" aria-label="News categories"></nav>
+    <!-- V24: Market Pulse as full-width card below Top News -->
+    <section class="market-section" id="marketSection">
+      <aside class="market-pulse" id="marketPulse">
+        <div class="market-head"><span>MARKET PULSE</span><em id="marketObservedLabel">Observed</em></div>
+        <div id="marketGroups" class="market-groups"></div>
+      </aside>
     </section>
+
+    <section id="returnStrip" class="return-strip" hidden><div><span class="return-kicker">SINCE YOU WERE AWAY</span><b id="returnTitle">—</b></div><div id="returnList" class="return-list"></div></section>
 
     <section class="insight-grid">
       <article class="insight-card india"><div class="panel-title"><span>INDIA LENS</span><em>What matters to India</em></div><div id="indiaList" class="insight-list"></div></article>
@@ -79,6 +91,31 @@
 
   <section id="searchView" class="search-view" hidden><div class="search-head"><span class="section-kicker">SEARCH</span><h2 id="searchTitle">Results</h2></div><div id="searchResults" class="search-results"></div></section>
 </main>
+
+<!-- V24: Persistent Bottom Navigation -->
+<nav class="bottom-nav" id="bottomNav" aria-label="Main navigation">
+  <button class="bnav-item active" data-nav="home" aria-label="Home">
+    <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 001 1h3a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1h3a1 1 0 001-1V10"/></svg>
+    <span>Home</span>
+  </button>
+  <button class="bnav-item" data-nav="radar" aria-label="Radar">
+    <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><line x1="12" y1="2" x2="12" y2="6"/></svg>
+    <span>Radar</span>
+  </button>
+  <button class="bnav-item" data-nav="inbox" aria-label="Inbox">
+    <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-6l-2 3H10l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>
+    <span>Inbox</span>
+    <i class="bnav-badge" id="bnavInboxBadge" hidden></i>
+  </button>
+  <button class="bnav-item" data-nav="replay" aria-label="Replay">
+    <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/><circle cx="12" cy="12" r="1"/><polyline points="12 8 12 12 15 14"/></svg>
+    <span>Replay</span>
+  </button>
+  <button class="bnav-item" data-nav="search" aria-label="Search">
+    <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <span>Search</span>
+  </button>
+</nav>
 
 <div id="storyModal" class="modal" aria-hidden="true"><div class="modal-backdrop" id="modalBackdrop"></div><section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
   <button id="modalClose" class="modal-close" aria-label="Close">×</button><div id="modalKicker" class="modal-kicker">LIVING STORY</div><h2 id="modalTitle">—</h2><div id="modalPublished" class="modal-published">—</div>
