@@ -139,6 +139,12 @@ class DatabaseConnection:
             if "ON CONFLICT" not in q.upper():
                 q = q.rstrip(";") + " ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=EXCLUDED.updated_at"
 
+        # Translate SQLite GROUP_CONCAT to PostgreSQL STRING_AGG
+        # Two arguments: GROUP_CONCAT(expr, 'sep') -> STRING_AGG(expr, 'sep')
+        q = re.sub(r"(?i)\bGROUP_CONCAT\s*\(\s*([^,]+?)\s*,\s*('[^']+'|\"[^\"]+\")\s*\)", r"STRING_AGG(\1, \2)", q)
+        # One argument: GROUP_CONCAT(expr) -> STRING_AGG(expr, ',')
+        q = re.sub(r"(?i)\bGROUP_CONCAT\s*\(\s*([^)]+?)\s*\)", r"STRING_AGG(\1, ',')", q)
+
         return q
 
     def execute(self, query: str, params: Union[tuple, list] = ()):

@@ -603,7 +603,7 @@ def request_bytes(url, etag=None, last_modified=None, timeout=8):
     curl=shutil.which("curl") or shutil.which("curl.exe")
     if curl:
         import tempfile
-        with tempfile.TemporaryDirectory(prefix="aetheria-hdr-") as td:
+        with tempfile.TemporaryDirectory(prefix="aetheria-hdr-", ignore_cleanup_errors=True) as td:
             hp=str(Path(td)/"headers.txt")
             cmd=[curl,"-sS","-L","--compressed","--connect-timeout",str(CONNECT_TIMEOUT),"--max-time",str(timeout),"-A",USER_AGENT,"-D",hp,"-o","-"]
             for k,v in headers.items(): cmd += ["-H",f"{k}: {v}"]
@@ -1245,22 +1245,32 @@ def build_enriched():
         con=db_read()
         rows=con.execute("SELECT * FROM events WHERE last_seen>? AND length(trim(title))>=8 ORDER BY last_seen DESC LIMIT ?",(cutoff,EVENT_POOL_LIMIT)).fetchall()
         if not rows:
+            # Fallback: if no events match the active window (e.g. clock drift or quiet window),
+            # retrieve the most recent events available in the database instead of failing.
+            rows=con.execute("SELECT * FROM events WHERE length(trim(title))>=8 ORDER BY last_seen DESC LIMIT ?",(EVENT_POOL_LIMIT,)).fetchall()
+        if not rows:
             return []
         ids=[r["id"] for r in rows]
-        marks=",".join("?" for _ in ids)
-        meta=con.execute(f"""SELECT ea.event_id,
-            MAX(CASE WHEN a.id=e.primary_article_id THEN a.canonical_url END) primary_url,
-            MAX(CASE WHEN a.id=e.primary_article_id THEN a.domain END) primary_domain,
-            MAX(CASE WHEN a.id=e.primary_article_id THEN a.image_url END) image_url,
-            MAX(CASE WHEN a.id=e.primary_article_id THEN a.published END) published,
-            MAX(CASE WHEN a.id=e.primary_article_id THEN a.description END) description,
-            GROUP_CONCAT(DISTINCT a.domain) domains,
-            GROUP_CONCAT(DISTINCT a.language) languages,
-            GROUP_CONCAT(DISTINCT a.country) countries
-          FROM event_articles ea JOIN articles a ON a.id=ea.article_id JOIN events e ON e.id=ea.event_id
-          WHERE ea.event_id IN ({marks}) GROUP BY ea.event_id""",ids).fetchall()
+        meta=[]
+        chunk_size=500
+        for i in range(0, len(ids), chunk_size):
+            chunk_ids=ids[i:i+chunk_size]
+            marks=",".join("?" for _ in chunk_ids)
+            chunk_meta=con.execute(f"""SELECT ea.event_id,
+                MAX(CASE WHEN a.id=e.primary_article_id THEN a.canonical_url END) primary_url,
+                MAX(CASE WHEN a.id=e.primary_article_id THEN a.domain END) primary_domain,
+                MAX(CASE WHEN a.id=e.primary_article_id THEN a.image_url END) image_url,
+                MAX(CASE WHEN a.id=e.primary_article_id THEN a.published END) published,
+                MAX(CASE WHEN a.id=e.primary_article_id THEN a.description END) description,
+                GROUP_CONCAT(DISTINCT a.domain) domains,
+                GROUP_CONCAT(DISTINCT a.language) languages,
+                GROUP_CONCAT(DISTINCT a.country) countries
+              FROM event_articles ea JOIN articles a ON a.id=ea.article_id JOIN events e ON e.id=ea.event_id
+              WHERE ea.event_id IN ({marks}) GROUP BY ea.event_id""",chunk_ids).fetchall()
+            meta.extend(chunk_meta)
         learn=con.execute("SELECT key,value,observations FROM learning WHERE key LIKE 'topic_open_rate:%'").fetchall()
-    except Exception:
+    except Exception as exc:
+        print(f"[Aetheria build_enriched warning] {type(exc).__name__}: {str(exc)[:180]}", flush=True)
         return []
     finally:
         if con:
@@ -1626,7 +1636,12 @@ def rebuild_snapshot():
     future=future_watch()
     if not enriched:
         with SNAPSHOT_LOCK:
-            SNAPSHOT={"revision":SNAPSHOT.get("revision",0)+1,"built_at":now(),"events":[],"flash":[],"important":[],"impact":[],"latest":[],"moving":[],"sections":[],"categories":category_payload_fast([]),"future":future,"market":market_snapshot,"home":build_home_payload([],[],[],[],future,[]),"state":state}
+            if SNAPSHOT.get("events"):
+                SNAPSHOT["built_at"] = now()
+                SNAPSHOT["state"] = state
+                SNAPSHOT["market"] = market_snapshot
+            else:
+                SNAPSHOT={"revision":SNAPSHOT.get("revision",0)+1,"built_at":now(),"events":[],"flash":[],"important":[],"impact":[],"latest":[],"moving":[],"sections":[],"categories":category_payload_fast([]),"future":future,"market":market_snapshot,"home":build_home_payload([],[],[],[],future,[]),"state":state}
         FEED_INVALIDATED.clear(); return
 
     enriched_sorted=sorted(enriched,key=lambda x:(x["latest_score"],x["flash_score"]),reverse=True)
@@ -2156,11 +2171,11 @@ def knowledge_gap(eid):
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version="HTTP/1.1"
-    def send_json(self,status,payload,etag=None):
+    def send_json(self,status,payload,etag=None,send_body=True):
         body=json.dumps(payload,ensure_ascii=False,separators=(",",":")).encode(); self.send_response(status); self.send_header("Content-Type","application/json; charset=utf-8"); self.send_header("Cache-Control","no-store"); self.send_header("Content-Length",str(len(body))); self.send_header("Access-Control-Allow-Origin","*");
         if etag: self.send_header("ETag",etag)
         self.end_headers();
-        if status!=304: self.wfile.write(body)
+        if status!=304 and send_body: self.wfile.write(body)
     def do_POST(self):
         path=urllib.parse.urlsplit(self.path).path
         if path=="/api/telemetry":
@@ -2170,47 +2185,67 @@ class Handler(BaseHTTPRequestHandler):
             except Exception: pass
             self.send_json(400,{"ok":False}); return
         self.send_json(404,{"ok":False,"error":"not found"})
+    def do_HEAD(self):
+        self._route_request(send_body=False)
+
     def do_GET(self):
+        self._route_request(send_body=True)
+
+    def _route_request(self, send_body: bool = True):
         p=urllib.parse.urlsplit(self.path); path=p.path
-        if path=="/api/version": self.send_json(200,{"ok":True,"version":VERSION,"build":"world-experience","started_at":STARTED_AT}); return
-        if path=="/api/health": self.send_json(200,{"ok":True,"version":VERSION,"state":system_state()}); return
+        if path=="/api/version":
+            self.send_json(200,{"ok":True,"version":VERSION,"build":"world-experience","started_at":STARTED_AT},send_body=send_body); return
+        if path=="/api/health":
+            self.send_json(200,{"ok":True,"version":VERSION,"state":system_state()},send_body=send_body); return
         if path in ("/api/bootstrap","/api/news"):
             with SNAPSHOT_LOCK: snap=SNAPSHOT.copy()
             rev=str(snap.get("revision",0)); inm=self.headers.get("If-None-Match")
-            if inm and inm.strip('"')==rev: self.send_response(304); self.send_header("ETag",f'"{rev}"'); self.end_headers(); return
-            payload={"ok":bool(snap["events"]),"version":VERSION,"ready":bool(snap["events"]),"warming_up":not bool(snap["events"]),"revision":snap["revision"],"updated":datetime.now(timezone.utc).isoformat(),"events":snap["events"],"flash":snap.get("flash",[]),"important":snap["important"],"impact":snap["impact"],"latest":snap["latest"],"moving":snap["moving"],"sections":snap["sections"],"categories":snap["categories"],"future":snap.get("future",[]),"market":snap.get("market",{}),"home":snap.get("home",{}),"state":snap["state"]}
-            self.send_json(200,payload,rev); return
+            if inm and inm.strip('"')==rev:
+                self.send_response(304); self.send_header("ETag",f'"{rev}"'); self.end_headers(); return
+            has_events=bool(snap.get("events"))
+            sys_st=snap.get("state") or system_state()
+            is_ready=has_events or bool(sys_st.get("ready"))
+            payload={"ok":is_ready,"version":VERSION,"ready":is_ready,"warming_up":not is_ready,"revision":snap.get("revision",0),"updated":datetime.now(timezone.utc).isoformat(),"events":snap.get("events",[]),"flash":snap.get("flash",[]),"important":snap.get("important",[]),"impact":snap.get("impact",[]),"latest":snap.get("latest",[]),"moving":snap.get("moving",[]),"sections":snap.get("sections",[]),"categories":snap.get("categories",[]),"future":snap.get("future",[]),"market":snap.get("market",{}),"home":snap.get("home",{}),"state":sys_st}
+            self.send_json(200,payload,rev,send_body=send_body); return
         if path=="/api/search":
-            q=urllib.parse.parse_qs(p.query).get("q",[""])[0]; self.send_json(200,{"ok":True,"query":q,"results":search_events(q)}); return
+            q=urllib.parse.parse_qs(p.query).get("q",[""])[0]; self.send_json(200,{"ok":True,"query":q,"results":search_events(q)},send_body=send_body); return
         if path=="/api/suggest":
-            q=urllib.parse.parse_qs(p.query).get("q",[""])[0]; self.send_json(200,{"ok":True,"query":q,"results":suggest_events(q)}); return
+            q=urllib.parse.parse_qs(p.query).get("q",[""])[0]; self.send_json(200,{"ok":True,"query":q,"results":suggest_events(q)},send_body=send_body); return
         if path=="/api/replay":
-            q=urllib.parse.parse_qs(p.query).get("date",[""])[0]; self.send_json(200,{"ok":True,**replay_day(q)}); return
+            q=urllib.parse.parse_qs(p.query).get("date",[""])[0]; self.send_json(200,{"ok":True,**replay_day(q)},send_body=send_body); return
         if path=="/api/knowledge-gap/" or path.startswith("/api/knowledge-gap/"):
             eid=path.rsplit("/",1)[-1]; d=knowledge_gap(eid)
-            if not d: self.send_json(404,{"ok":False,"error":"event not found"}); return
-            self.send_json(200,{"ok":True,**d}); return
-        if path=="/api/future": self.send_json(200,{"ok":True,"events":future_watch(40)}); return
+            if not d: self.send_json(404,{"ok":False,"error":"event not found"},send_body=send_body); return
+            self.send_json(200,{"ok":True,**d},send_body=send_body); return
+        if path=="/api/future":
+            self.send_json(200,{"ok":True,"events":future_watch(40)},send_body=send_body); return
         if path=="/api/ready":
             with SNAPSHOT_LOCK: ready=bool(SNAPSHOT.get("events"))
-            self.send_json(200,{"ok":ready,"version":VERSION,"snapshot_revision":SNAPSHOT.get("revision",0),"events":len(SNAPSHOT.get("events",[]))}); return
-        if path=="/api/market": self.send_json(200,{"ok":True,**request_market_refresh(force=False)}); return
-        if path=="/api/intelligence/status": self.send_json(200,{"ok":True,**intelligence_status()}); return
+            self.send_json(200,{"ok":ready,"version":VERSION,"snapshot_revision":SNAPSHOT.get("revision",0),"events":len(SNAPSHOT.get("events",[]))},send_body=send_body); return
+        if path=="/api/market":
+            self.send_json(200,{"ok":True,**request_market_refresh(force=False)},send_body=send_body); return
+        if path=="/api/intelligence/status":
+            self.send_json(200,{"ok":True,**intelligence_status()},send_body=send_body); return
         if path=="/api/deployment":
-            self.send_json(200,{"ok":True,"version":VERSION,"host":HOST,"port":PORT,"always_on_ready":True,"admin_access":"Tailscale Serve supported","public_access":"Tailscale Funnel or Cloudflare Tunnel supported","note":"The engine still requires an always-on host; deployment scripts are included in this package."}); return
-        if path=="/api/sources": self.send_json(200,{"sources":source_status()}); return
-        if path=="/api/diagnostics": self.send_json(200,diagnostics_payload()); return
+            self.send_json(200,{"ok":True,"version":VERSION,"host":HOST,"port":PORT,"always_on_ready":True,"admin_access":"Tailscale Serve supported","public_access":"Tailscale Funnel or Cloudflare Tunnel supported","note":"The engine still requires an always-on host; deployment scripts are included in this package."},send_body=send_body); return
+        if path=="/api/sources":
+            self.send_json(200,{"sources":source_status()},send_body=send_body); return
+        if path=="/api/diagnostics":
+            self.send_json(200,diagnostics_payload(),send_body=send_body); return
         if path=="/api/perf":
-            with SNAPSHOT_LOCK: self.send_json(200,{"ok":True,"version":VERSION,"snapshot_revision":SNAPSHOT.get("revision",0),"snapshot_age_ms":round((now()-SNAPSHOT.get("built_at",now()))*1000,1),"events_cached":len(SNAPSHOT.get("events",[])),"workers":MAX_WORKERS}); return
-        if path=="/api/state": self.send_json(200,{"ok":True,"state":system_state()}); return
+            with SNAPSHOT_LOCK: self.send_json(200,{"ok":True,"version":VERSION,"snapshot_revision":SNAPSHOT.get("revision",0),"snapshot_age_ms":round((now()-SNAPSHOT.get("built_at",now()))*1000,1),"events_cached":len(SNAPSHOT.get("events",[])),"workers":MAX_WORKERS},send_body=send_body); return
+        if path=="/api/state":
+            self.send_json(200,{"ok":True,"state":system_state()},send_body=send_body); return
         if path=="/api/event/" or path.startswith("/api/event/"):
             eid=path.rsplit("/",1)[-1]; d=event_detail(eid)
-            if not d: self.send_json(404,{"ok":False}); return
-            self.send_json(200,{"ok":True,**d}); return
+            if not d: self.send_json(404,{"ok":False},send_body=send_body); return
+            self.send_json(200,{"ok":True,**d},send_body=send_body); return
         safe=path.lstrip("/") or "index.html"; target=(WEB_DIR/safe).resolve()
         if not str(target).startswith(str(WEB_DIR.resolve())) or not target.is_file(): target=WEB_DIR/"index.html"
         ct={".html":"text/html; charset=utf-8",".css":"text/css; charset=utf-8",".js":"application/javascript; charset=utf-8",".json":"application/json; charset=utf-8",".webmanifest":"application/manifest+json"}.get(target.suffix,"application/octet-stream")
-        data=target.read_bytes(); self.send_response(200); self.send_header("Content-Type",ct); self.send_header("Cache-Control","no-store"); self.send_header("Content-Length",str(len(data))); self.end_headers(); self.wfile.write(data)
+        data=target.read_bytes(); self.send_response(200); self.send_header("Content-Type",ct); self.send_header("Cache-Control","no-store"); self.send_header("Content-Length",str(len(data))); self.end_headers()
+        if send_body:
+            self.wfile.write(data)
     def log_message(self,fmt,*args): print(f"[Aetheria] {self.address_string()} - {fmt%args}")
 
 
