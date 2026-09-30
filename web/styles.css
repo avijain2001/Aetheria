@@ -729,7 +729,7 @@ body{font:14.5px/1.5 'Inter',ui-sans-serif,system-ui,-apple-system,BlinkMacSyste
 /* ---- Mobile Navigation Command Dock: Floating Rounded Glass Capsule ---- */
 .bottom-nav{
   position:fixed;
-  bottom:14px;
+  bottom:4px;
   left:50%;
   transform:translateX(-50%);
   width:calc(100% - 32px);
@@ -1211,10 +1211,10 @@ body{font:14.5px/1.5 'Inter',ui-sans-serif,system-ui,-apple-system,BlinkMacSyste
   .live-story h3{font-size:13.5px}
   .news-row{grid-template-columns:68px minmax(0,1fr) auto;gap:10px;padding:11px 0}
   .row-thumb{width:68px;height:50px;border-radius:6px}
-  .bottom-nav{bottom:calc(10px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);width:calc(100% - 24px);max-width:390px;height:50px;border-radius:26px;padding:0 4px}
+  .bottom-nav{bottom:calc(3px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);width:calc(100% - 24px);max-width:390px;height:50px;border-radius:26px;padding:0 4px}
   .bnav-icon{width:19px;height:19px}
   .bnav-item span{font-size:9px}
-  .toast{bottom:calc(66px + env(safe-area-inset-bottom,0px))}
+  .toast{bottom:calc(56px + env(safe-area-inset-bottom,0px))}
   .story-stack{height:250px}
   .stack-card{display:flex;flex-direction:column;grid-template-columns:1fr}
   .stack-media{height:90px;min-height:90px;order:-1;border-radius:10px 10px 0 0}

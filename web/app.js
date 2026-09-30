@@ -161,10 +161,10 @@ function renderMarket(){
       } else {
         const allItems=[];
         groups.forEach(g=>(g.items||[]).forEach(it=>allItems.push(it)));
-        const prioritySymbols=['NIFTY 50','SENSEX','USD/INR','BRENT CRUDE','GOLD','S&P 500','NASDAQ 100'];
+        const prioritySymbols=['NIFTY 50','SENSEX','USD/INR','BRENT CRUDE','GOLD','SILVER','S&P 500','NASDAQ'];
         const chosen=[];
         prioritySymbols.forEach(sym=>{
-          const match=allItems.find(it=>String(it.symbol||it.label||'').toUpperCase()===sym.toUpperCase()||String(it.label||'').toUpperCase().includes(sym.toUpperCase()));
+          const match=allItems.find(it=>String(it.symbol||it.label||'').toUpperCase()===sym.toUpperCase()||String(it.label||'').toUpperCase().includes(sym.toUpperCase())||String(it.symbol||'').toUpperCase().includes(sym.toUpperCase()));
           if(match&&!chosen.some(x=>x.symbol===match.symbol))chosen.push(match);
         });
         if(chosen.length<6){
@@ -366,8 +366,16 @@ function render(){
   renderDesks();
   showReturn();
 }
-async function getJSON(url,signal=null,ms=7000){const c=new AbortController();const t=setTimeout(()=>c.abort(),ms);if(signal)signal.addEventListener('abort',()=>c.abort(),{once:true});try{const r=await fetch(url,{signal:c.signal,cache:'no-store'});if(!r.ok)throw new Error(`${r.status}`);return await r.json()}finally{clearTimeout(t)}}
-async function refresh(){if(state.refreshInFlight)return;state.refreshInFlight=true;try{const d=await getJSON('/api/bootstrap',null,7000);const changed=!state.initialized||num(d.revision)!==num(state.revision);const y=window.scrollY;Object.assign(state,{revision:num(d.revision),events:d.events||[],flash:d.flash||[],impact:d.impact||[],latest:d.latest||[],moving:d.moving||[],sections:d.sections||[],future:d.future||[],market:d.market||{},home:d.home||{},categories:d.categories||[]});applyState(d.state||{});cacheBootstrap(d);startTicker();if(changed&&!state.searchMode)render();if(!state.initialized)render();if(changed&&state.initialized)requestAnimationFrame(()=>window.scrollTo({top:y,behavior:'auto'}));state.initialized=true;checkRadars();}catch(e){if(!state.initialized){$('liveLabel').textContent='CHECKING';$('tickerBtn').textContent='Waiting for verified reports…'}}finally{state.refreshInFlight=false}}
+async function loadMarket(){
+  try{
+    const m=await getJSON("/api/market",null,6500);
+    if(m&&m.groups&&m.groups.length){
+      state.market=m;
+      renderMarket();
+    }
+  }catch(e){}
+}
+async function refresh(){if(state.refreshInFlight)return;state.refreshInFlight=true;try{const d=await getJSON('/api/bootstrap',null,7000);const changed=!state.initialized||num(d.revision)!==num(state.revision);const y=window.scrollY;Object.assign(state,{revision:num(d.revision),events:d.events||[],flash:d.flash||[],impact:d.impact||[],latest:d.latest||[],moving:d.moving||[],sections:d.sections||[],future:d.future||[],market:d.market||{},home:d.home||{},categories:d.categories||[]});applyState(d.state||{});cacheBootstrap(d);startTicker();if(changed&&!state.searchMode)render();if(!state.initialized)render();if(changed&&state.initialized)requestAnimationFrame(()=>window.scrollTo({top:y,behavior:'auto'}));state.initialized=true;if(!state.market?.groups?.length)loadMarket();checkRadars();}catch(e){if(!state.initialized){$('liveLabel').textContent='CHECKING';$('tickerBtn').textContent='Waiting for verified reports…'}}finally{state.refreshInFlight=false}}
 function startTicker(){if(state.tickerTimer)clearInterval(state.tickerTimer);state.tickerIndex=0;const tick=()=>{const a=(state.latest||[]).filter(topicFilter).slice(0,12);if(!a.length){$('tickerBtn').textContent='Waiting for verified reports…';$('tickerBtn').dataset.event='';return}const e=a[state.tickerIndex%a.length];state.tickerIndex++;$('tickerBtn').textContent=e.title;$('tickerBtn').dataset.event=e.id};tick();state.tickerTimer=setInterval(tick,8000)}
 function wireStoryRows(id){$(id)?.querySelectorAll('[data-event]').forEach(x=>{x.onclick=e=>{if(e.target.closest('a'))return;openStory(x.dataset.event)}})}
 function renderSearch(){
@@ -655,4 +663,4 @@ document.querySelectorAll('.bnav-item').forEach(b=>b.onclick=()=>{
 });
 /* V24: Brand click always resets to home */
 $('brandHome').addEventListener('click',e=>{e.preventDefault();if(state.searchMode)clearSearch();state.topic='Top';state.stackIndex=0;persistUi();render();window.scrollTo({top:0,behavior:'smooth'});document.querySelectorAll('.bnav-item').forEach(x=>x.classList.toggle('active',x.dataset.nav==='home'))});
-const savedTheme=localStorage.getItem('aetheria-theme');if(savedTheme)document.documentElement.dataset.theme=savedTheme;restoreUi();hydrateCached();renderInboxCount();loadFollowUp();setInterval(refresh,7000);setInterval(async()=>{try{const m=await getJSON("/api/market",null,6500);state.market=m;renderMarket()}catch{}},120000);setInterval(checkRadars,60000);setInterval(loadFollowUp,60000);setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})},1000);startTicker();refresh();
+const savedTheme=localStorage.getItem('aetheria-theme');if(savedTheme)document.documentElement.dataset.theme=savedTheme;restoreUi();hydrateCached();loadMarket();renderInboxCount();loadFollowUp();setInterval(refresh,7000);setInterval(async()=>{try{const m=await getJSON("/api/market",null,6500);state.market=m;renderMarket()}catch{}},120000);setInterval(checkRadars,60000);setInterval(loadFollowUp,60000);setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})},1000);startTicker();refresh();

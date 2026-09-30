@@ -1460,14 +1460,17 @@ def _bullion_prices():
                 name=str((x.get("name") or x.get("metal") or x.get("symbol") or "")).lower()
                 val=x.get("sell") or x.get("price") or x.get("rate")
                 if val is None: continue
-                if "gold" in name and not any(o["symbol"]=="Gold / India quote" for o in out): out.append({"symbol":"Gold / India quote","price":float(val),"change":None,"currency":str(x.get("currency") or "INR"),"at":now()})
-                if "silver" in name and not any(o["symbol"]=="Silver / India quote" for o in out): out.append({"symbol":"Silver / India quote","price":float(val),"change":None,"currency":str(x.get("currency") or "INR"),"at":now()})
+                if "gold" in name and not any(o["symbol"]=="Gold / India quote" for o in out): out.append({"symbol":"Gold / India quote","label":"GOLD","price":float(val),"change":None,"currency":str(x.get("currency") or "INR"),"at":now()})
+                if "silver" in name and not any(o["symbol"]=="Silver / India quote" for o in out): out.append({"symbol":"Silver / India quote","label":"SILVER","price":float(val),"change":None,"currency":str(x.get("currency") or "INR"),"at":now()})
     except Exception:
         pass
     if not out:
         for sym,label in (("GC=F","Gold / global futures"),("SI=F","Silver / global futures")):
             try:
-                q=_yahoo_quote(sym); q["symbol"]=label; out.append(q)
+                q=_yahoo_quote(sym)
+                q["symbol"]=label
+                q["label"]="GOLD" if "Gold" in label else "SILVER"
+                out.append(q)
             except Exception:
                 pass
     return out
@@ -1749,17 +1752,33 @@ def build_home_payload(enriched, ranked_latest, important_objs, impact_objs, fut
         return {"lead":None,"stack":[],"flash":[],"happening":[],"india_lens":[],"impact":[],"emerging":[],"read_next":[],"now":None,"next":(future or [None])[0],"pressure":[],"metrics":{"reports_24h":0,"events_24h":0,"confirmed":0,"developing":0,"disputed":0,"unverified":0,"flash":0},"ai":intelligence_status()}
     used=set()
     flash_ids={o["id"] for o in flash_objs}
-    def editorial_weight(o):
+    def _stack_score(x):
+        """Recency-first score for the Story Stack.
+        Stories from the last 8h get a strong time-decay boost; older stories
+        are progressively discounted so stale content cannot block fresh breaking news."""
+        o=x["obj"]
         age_h=max(0.0,(now_ts-float(o.get("last_seen") or now_ts))/3600.0)
-        freshness=max(0.0,1.0-age_h/24.0)
+        # Exponential recency multiplier: 8h → 1.0, 24h → 0.50, 48h → 0.20, 72h → 0.08
+        if age_h<=8.0:
+            recency=1.0
+        elif age_h<=24.0:
+            recency=1.0-0.50*(age_h-8.0)/16.0   # 1.0 → 0.50
+        elif age_h<=48.0:
+            recency=0.50-0.30*(age_h-24.0)/24.0  # 0.50 → 0.20
+        else:
+            recency=max(0.05,0.20-0.15*(age_h-48.0)/24.0)  # 0.20 → 0.05
+        freshness=max(0.0,1.0-age_h/36.0)
         sig=float((o.get("signals") or {}).get("global") or 0)
         india=float(o.get("india_lens_score") or 0)
         velocity=float(o.get("velocity") or 0)
-        return freshness*.42 + india*.32 + sig*.16 + velocity*.10
+        editorial=float(x.get("editorial_score",0))
+        # Blend: 55% recency-freshness, 20% editorial quality, 15% india, 10% velocity
+        return recency*(freshness*0.55 + editorial*0.20 + india*0.15 + velocity*0.10)
 
+    # Stack candidates: prefer events seen in the last 36h; fall back to all if fewer than 4
     fresh_editorial=[x for x in enriched if x["obj"]["id"] not in flash_ids and max(0.0,(now_ts-float(x["obj"].get("last_seen") or now_ts))/3600.0)<=36.0]
     editorial_candidates=fresh_editorial if len(fresh_editorial)>=4 else [x for x in enriched if x["obj"]["id"] not in flash_ids]
-    editorial_pool=sorted(editorial_candidates, key=lambda x:(x.get("editorial_score",0),x.get("latest_score",0)), reverse=True)
+    editorial_pool=sorted(editorial_candidates, key=_stack_score, reverse=True)
     stack=[x["obj"] for x in editorial_pool[:10]]
     # If the live pool is temporarily smaller, keep a true latest-first fallback from
     # already verified events, never fabricate stories.
@@ -1780,7 +1799,13 @@ def build_home_payload(enriched, ranked_latest, important_objs, impact_objs, fut
         lang_in=bool(set(str(x).lower() for x in (o.get("languages") or [])) & INDIA_LANGUAGES)
         local=o.get("local_relevance",0)>0
         if india_score>=.35 or country_in or lang_in or local or o.get("topic") in {"India","Local"}: india_pool.append(o)
-    india_pool=sorted(india_pool,key=lambda o:(float((o.get("signals") or {}).get("india") or 0),float(o.get("local_relevance") or 0),float(o.get("velocity") or 0),float(o.get("last_seen") or 0)),reverse=True)
+    # India Now: sort primarily by recency so truly breaking India news surfaces first.
+    # Secondary sort by india signal and local relevance for diversity.
+    india_pool=sorted(india_pool,key=lambda o:(
+        float(o.get("last_seen") or 0)*0.70
+        +float((o.get("signals") or {}).get("india") or 0)*3600.0*8.0*0.20
+        +float(o.get("local_relevance") or 0)*3600.0*8.0*0.10
+    ),reverse=True)
     happening=[]; hc=Counter(); hd=Counter()
     for o in india_pool:
         topic=o.get("topic") or "World"; dom=o.get("domain") or ""
