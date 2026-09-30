@@ -2300,6 +2300,21 @@ def knowledge_gap(eid):
 
 
 
+# Category-specific adaptive reporting baselines (seconds)
+# A Supreme Court case, regulatory probe, or bilateral treaty does not update every 6 hours.
+CATEGORY_BASELINES = {
+    "Legal": 10 * 86400,          # 10 days natural update cycle
+    "Geopolitics": 6 * 86400,     # 6 days natural cycle
+    "Business": 4 * 86400,        # 4 days natural cycle
+    "Technology": 4 * 86400,      # 4 days natural cycle
+    "Markets": 1.5 * 86400,       # 1.5 days natural cycle
+    "Sports": 1 * 86400,          # 1 day natural cycle
+    "Weather": 0.75 * 86400,      # 18 hours natural cycle
+    "Local": 1.5 * 86400,         # 1.5 days natural cycle
+    "World": 3 * 86400,           # 3 days natural cycle
+    "India": 2 * 86400            # 2 days natural cycle
+}
+
 def classify_story_lifecycle(event: dict, updates: list) -> dict:
     t = now()
     first_seen = float(event.get("first_seen") or t)
@@ -2308,38 +2323,68 @@ def classify_story_lifecycle(event: dict, updates: list) -> dict:
     velocity = float(event.get("velocity") or 0.0)
     status = str(event.get("status") or "DEVELOPING").upper()
     title = str(event.get("title") or "")
-    topic = str(event.get("topic") or "")
+    topic = str(event.get("topic") or "World")
     
     time_since_last = max(0.0, t - last_seen)
     total_span = max(0.0, last_seen - first_seen)
+    expected_interval = CATEGORY_BASELINES.get(topic, 3 * 86400)
     
-    # Story Revival detection:
-    # Event had low/quiet activity for days, but a fresh verified update appeared recently (<= 48h).
+    # 1. Story Revival Detection (Adaptive):
+    # A story is revived if it had an inactive gap relative to its category baseline
+    # and has received fresh corroborating reporting within the last 48 hours.
     is_revived = False
     revived_gap_days = 0
-    if len(updates) >= 2 and time_since_last <= 48 * 3600 and total_span >= 3 * 86400:
+    if len(updates) >= 2 and time_since_last <= 48 * 3600:
         u_times = sorted([float(u.get("observed_at") or 0) for u in updates if u.get("observed_at")], reverse=True)
-        if len(u_times) >= 2 and (u_times[0] - u_times[1]) >= 3 * 86400:
-            is_revived = True
-            revived_gap_days = max(3, int((u_times[0] - u_times[1]) / 86400))
-    elif time_since_last <= 48 * 3600 and (t - first_seen) >= 7 * 86400 and source_count >= 3:
+        if len(u_times) >= 2:
+            gap = u_times[0] - u_times[1]
+            if gap >= expected_interval * 0.8:
+                is_revived = True
+                revived_gap_days = max(2, int(gap / 86400))
+    elif time_since_last <= 48 * 3600 and (t - first_seen) >= (expected_interval * 2) and source_count >= 3:
         is_revived = True
-        revived_gap_days = max(4, int((t - first_seen) / 86400))
+        revived_gap_days = max(3, int((t - first_seen) / 86400))
 
+    # 2. DIMENSION A: Story Lifecycle State (EMERGING, DEVELOPING, QUIET, REVIVED, RESOLVED)
+    # HOT is intentionally decoupled from lifecycle state and tracked under attention_state.
     if status == "RESOLVED":
         lifecycle = "RESOLVED"
     elif is_revived:
         lifecycle = "REVIVED"
-    elif velocity >= 0.25 and source_count >= 5 and time_since_last <= 86400:
-        lifecycle = "HOT"
-    elif time_since_last <= 3 * 86400:
+    elif total_span < (expected_interval * 0.35) and source_count <= 2:
+        lifecycle = "EMERGING"
+    elif time_since_last <= expected_interval:
         lifecycle = "DEVELOPING"
-    elif time_since_last <= 5 * 86400:
-        lifecycle = "COOLING"
     else:
         lifecycle = "QUIET"
 
-    # Why Aetheria is still monitoring (evidence-grounded reason)
+    # 3. DIMENSION B: Attention State (LOW, RISING, PEAK, FALLING)
+    # Measures current media velocity, acceleration, and cross-source reporting momentum
+    if velocity >= 0.35 and source_count >= 5:
+        attention_state = "PEAK"
+    elif velocity >= 0.18 or (source_count >= 4 and time_since_last <= 86400):
+        attention_state = "RISING"
+    elif time_since_last > expected_interval * 0.7:
+        attention_state = "FALLING"
+    else:
+        attention_state = "LOW"
+
+    # 4. DIMENSION C: Importance State (LOW, MEDIUM, HIGH, CRITICAL)
+    # Decoupled from media attention/hype — reflects real-world impact and policy/legal significance
+    intel = event.get("intelligence") or {}
+    impact = float(intel.get("impact") or event.get("significance") or 0.5)
+    india_lens = float(event.get("india_relevance") or 0.0)
+    
+    if impact >= 0.78 or (impact >= 0.6 and india_lens >= 0.7):
+        importance_state = "CRITICAL"
+    elif impact >= 0.52 or india_lens >= 0.48 or source_count >= 5:
+        importance_state = "HIGH"
+    elif impact >= 0.32:
+        importance_state = "MEDIUM"
+    else:
+        importance_state = "LOW"
+
+    # 5. Why Aetheria is still monitoring (evidence-grounded reason)
     combined_text = f"{title} {topic} {event.get('summary') or ''}".lower()
     if any(k in combined_text for k in ("court", "judge", "verdict", "trial", "bail", "hearing", "sc", "hc", "bench", "litigation")):
         why_monitoring = "Judicial proceedings continuing; formal judgment or subsequent hearing pending."
@@ -2373,10 +2418,18 @@ def classify_story_lifecycle(event: dict, updates: list) -> dict:
         previous_state = "Story monitored under standard event tracking."
 
     days_quiet = max(1, int(time_since_last / 86400))
-    coverage_drop_pct = min(92, max(45, int(50 + (days_quiet * 4)))) if lifecycle in ("QUIET", "COOLING") else 0
+    ratio = time_since_last / max(86400.0, expected_interval)
+    if lifecycle == "QUIET":
+        coverage_drop_pct = min(95, max(30, int(35 + (ratio * 25))))
+    elif attention_state == "FALLING":
+        coverage_drop_pct = min(60, max(20, int(20 + (ratio * 15))))
+    else:
+        coverage_drop_pct = 0
 
     return {
         "lifecycle": lifecycle,
+        "attention_state": attention_state,
+        "importance_state": importance_state,
         "why_monitoring": why_monitoring,
         "what_changed": what_changed,
         "previous_state": previous_state,
@@ -2384,6 +2437,7 @@ def classify_story_lifecycle(event: dict, updates: list) -> dict:
         "coverage_drop_pct": coverage_drop_pct,
         "revived_gap_days": revived_gap_days,
         "source_count": source_count,
+        "expected_interval": expected_interval,
         "time_since_last_sec": time_since_last
     }
 
@@ -2445,6 +2499,9 @@ def get_follow_up_data(session: str, client_followed_ids: list | None = None) ->
             "sources": ev.get("sources") or 1,
             "source_domains": (ev.get("source_domains") or [])[:3],
             "lifecycle": meta["lifecycle"],
+            "attention": meta["attention_state"],
+            "importance": meta["importance_state"],
+            "expected_interval_days": round(meta["expected_interval"] / 86400, 1),
             "why_monitoring": meta["why_monitoring"],
             "what_changed": meta["what_changed"],
             "previous_state": meta["previous_state"],
@@ -2466,7 +2523,7 @@ def get_follow_up_data(session: str, client_followed_ids: list | None = None) ->
 
         if meta["lifecycle"] == "REVIVED":
             revived.append(item)
-        elif meta["lifecycle"] in ("QUIET", "COOLING"):
+        elif meta["lifecycle"] == "QUIET":
             quiet.append(item)
         else:
             active.append(item)
@@ -2645,7 +2702,7 @@ class Handler(BaseHTTPRequestHandler):
             eid=path.rsplit("/",1)[-1]; d=event_detail(eid)
             if not d: self.send_json(404,{"ok":False},send_body=send_body); return
             self.send_json(200,{"ok":True,**d},send_body=send_body); return
-        if path in ("/disclaimer", "/terms", "/privacy", "/copyright", "/disclaimer.html"):
+        if path in ("/disclaimer", "/disclaimer.html"):
             target = WEB_DIR / "disclaimer.html"
         else:
             safe = path.lstrip("/") or "index.html"

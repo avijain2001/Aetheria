@@ -110,7 +110,7 @@ function toggleCategories(open){
 }
 function isFresh(e){const t=num(e?.last_seen||e?.published);if(!t)return true;return(Date.now()/1000-t)<=1209600}
 function topicFilter(e){if(!isFresh(e))return false;return state.topic==='Top'||state.topic==='All'||e.topic===state.topic}
-function trustChip(e){const s=String(e?.status||'DEVELOPING').toUpperCase();return`<span class="truth truth-${s.toLowerCase()}">${esc(s)}</span>`}
+function trustChip(e){const s=String(e?.status||'DEVELOPING').toUpperCase();const label=s==='CONFIRMED'?'CORROBORATED':s;return`<span class="truth truth-${s.toLowerCase()}">${esc(label)}</span>`}
 function stackItems(){let items=(state.home?.stack||[]).filter(topicFilter);if(!items.length)items=(state.latest||[]).filter(topicFilter).slice(0,10);return items.slice(0,10)}
 function stackCard(e,pos,originalIndex){
   const sig=pct(e?.intelligence?.impact),conf=pct(e?.intelligence?.confidence);
@@ -268,7 +268,7 @@ function updateStackControls(items){
   $('stackNext').disabled=items.length<2;
 }
 function moveStack(dir){const items=stackItems();if(items.length<2)return;state.stackIndex=(state.stackIndex+dir+items.length)%items.length;persistUi();renderStack();telemetry(items[state.stackIndex].id,'stack')}
-function renderStackInsight(e){if(!e){$('stackInsight').innerHTML='';return}const reasons=(e.why_matters||e.india_lens_reasons||[]).slice(0,3);$('stackInsight').innerHTML=`<span>${e.status==='CONFIRMED'?'CONFIRMED EVIDENCE':e.status==='DISPUTED'?'CONFLICTING REPORTS':'DEVELOPING SIGNAL'}</span><b>${esc(reasons.join(' · ')||'Observed across the current source set')}</b>`}
+function renderStackInsight(e){if(!e){$('stackInsight').innerHTML='';return}const reasons=(e.why_matters||e.india_lens_reasons||[]).slice(0,3);$('stackInsight').innerHTML=`<span>${e.status==='CONFIRMED'?'CORROBORATED BY SOURCES':e.status==='DISPUTED'?'CONFLICTING REPORTS':'DEVELOPING SIGNAL'}</span><b>${esc(reasons.join(' · ')||'Observed across the current source set')}</b>`}
 function analysisHint(e){const s=e.signals||{},parts=[];if(num(s.india)>=.45)parts.push('India exposure');if(num(s.financial)>=.45)parts.push('Money / markets');if(num(s.supply_chain)>=.45)parts.push('Trade / supply');if(num(s.geopolitical)>=.45)parts.push('Policy / security');if(num(s.social)>=.45)parts.push('Public / safety');if(e.local_relevance)parts.push('Local relevance');return (parts.length?parts:(e.personal_relevance||e.why_matters||[])).slice(0,2).join(' · ')||'Aetheria Read available'}
 function renderHappening(items){
   const isTop=state.topic==='Top'||state.topic==='All';
@@ -562,23 +562,39 @@ function renderFollowUpView(){
 
   mainListEl.innerHTML=displayItems.map(it=>{
     let badgeClass='lifecycle-active';
-    let badgeText='🔴 ACTIVE';
+    let badgeText='🔴 DEVELOPING';
     let subText=`Updated ${age(it.last_seen)} ago`;
 
     if(it.lifecycle==='REVIVED'){
       badgeClass='lifecycle-revived';
       badgeText='🔵 STORY REVIVED';
-      subText=`Revived after ${it.revived_gap_days||'several'} days of low activity`;
-    } else if(it.lifecycle==='QUIET'||it.lifecycle==='COOLING'){
+      subText=`Revived after ${it.revived_gap_days||'several'} days quiet`;
+    } else if(it.lifecycle==='QUIET'){
       badgeClass='lifecycle-quiet';
       badgeText='🟡 QUIET — STILL IMPORTANT';
-      subText=`No major developments for ${it.days_quiet||'several'} days · Coverage ↓ ${it.coverage_drop_pct||65}% from peak`;
+      const baselineStr = it.expected_interval_days ? ` (natural cycle: ~${it.expected_interval_days}d)` : '';
+      subText=`No developments for ${it.days_quiet||1}d${baselineStr} · Relative attention ${it.coverage_drop_pct ? '↓ ' + it.coverage_drop_pct + '%' : 'steady'}`;
+    } else if(it.lifecycle==='EMERGING'){
+      badgeClass='lifecycle-active';
+      badgeText='⚪ EMERGING';
+      subText=`Initial reporting detected ${age(it.first_seen)} ago`;
+    } else if(it.lifecycle==='RESOLVED'){
+      badgeClass='lifecycle-active';
+      badgeText='🟢 RESOLVED';
+      subText=`Outcome verified`;
     }
+
+    const attentionText = it.attention ? `<span class="follow-dim-pill">ATTENTION: ${esc(it.attention)}</span>` : '';
+    const importanceText = it.importance ? `<span class="follow-dim-pill importance-${esc(String(it.importance).toLowerCase())}">IMPORTANCE: ${esc(it.importance)}</span>` : '';
 
     return `
       <article class="followup-card" data-event="${esc(it.id)}">
         <div class="followup-badge-row">
-          <span class="lifecycle-badge ${badgeClass}">${badgeText}</span>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span class="lifecycle-badge ${badgeClass}">${badgeText}</span>
+            ${attentionText}
+            ${importanceText}
+          </div>
           <span class="followup-card-time">${esc(subText)}</span>
         </div>
         <h3 data-open-event="${esc(it.id)}">${esc(it.title)}</h3>
