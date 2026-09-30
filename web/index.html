@@ -49,9 +49,9 @@
           <div id="stackInsight" class="stack-insight"></div>
           <article id="stackAnalysis" class="stack-analysis"></article>
         </div>
-        <aside class="india-now-panel">
-          <div class="panel-title"><span>INDIA NOW</span><em id="indiaNowCount">—</em></div>
-          <div id="happeningList" class="happening-list"></div>
+        <aside class="india-now-panel" id="indiaNowPanel">
+          <div class="panel-title"><span id="happeningPanelTitle">INDIA NOW</span><em id="indiaNowCount">—</em></div>
+          <div id="happeningList" class="happening-list" tabindex="0" role="region" aria-label="Live updates wire"></div>
         </aside>
       </div>
     </section>
@@ -77,8 +77,8 @@
     <section id="returnStrip" class="return-strip" hidden><div><span class="return-kicker">SINCE YOU WERE AWAY</span><b id="returnTitle">—</b></div><div id="returnList" class="return-list"></div></section>
 
     <section class="insight-grid">
-      <article class="insight-card india"><div class="panel-title"><span>INDIA LENS</span><em>What matters to India</em></div><div id="indiaList" class="insight-list"></div></article>
-      <article class="insight-card impact"><div class="panel-title"><span>IMPACT</span><em>What could matter next</em></div><div id="impactList" class="insight-list"></div></article>
+      <article class="insight-card india"><div class="panel-title"><span id="insightIndiaTitle">INDIA LENS</span><em>What matters to India</em></div><div id="indiaList" class="insight-list"></div></article>
+      <article class="insight-card impact"><div class="panel-title"><span id="insightImpactTitle">IMPACT</span><em>What could matter next</em></div><div id="impactList" class="insight-list"></div></article>
     </section>
 
     <section class="aether-intel-rail">
@@ -87,9 +87,9 @@
     </section>
 
     <section class="latest-zone">
-      <div class="zone-label"><span>02</span><b>LATEST</b><i></i><em>CHRONOLOGICAL</em></div>
-      <div class="latest-head"><div><h2>What just happened</h2><p>Fresh event activity, with Aetheria analysis available on every story.</p></div><div class="depth-switch" id="depthSwitch"><button data-depth="5">BRIEF</button><button data-depth="14" class="active">NORMAL</button><button data-depth="30">DEEP</button></div></div>
-      <div class="latest-layout"><div class="latest-main"><div id="feed" class="feed"></div><button id="loadMore" class="text-btn more-btn">Load more</button></div><aside class="read-next-panel"><div class="panel-title"><span>READ NEXT</span><em id="readNextCount">—</em></div><div id="readNextList" class="read-next-list"></div></aside></div>
+      <div class="zone-label"><span>02</span><b id="latestSectionLabel">LATEST</b><i></i><em id="latestSubLabel">CHRONOLOGICAL</em></div>
+      <div class="latest-head"><div><h2 id="latestHeading">What just happened</h2><p id="latestSubheading">Fresh event activity, with Aetheria analysis available on every story.</p></div><div class="depth-switch" id="depthSwitch"><button data-depth="5">BRIEF</button><button data-depth="14" class="active">NORMAL</button><button data-depth="30">DEEP</button></div></div>
+      <div class="latest-layout"><div class="latest-main"><div id="feed" class="feed"></div><button id="loadMore" class="text-btn more-btn">Load more</button></div><aside class="read-next-panel"><div class="panel-title"><span id="readNextPanelTitle">READ NEXT</span><em id="readNextCount">—</em></div><div id="readNextList" class="read-next-list"></div></aside></div>
     </section>
 
     <section class="early-zone"><div class="zone-label"><span>03</span><b>EARLY SIGNALS</b><i></i><em>DISCOVERY, NOT PREDICTION</em></div><div id="emergingList" class="emerging-list"></div></section>
@@ -102,29 +102,33 @@
   <section id="searchView" class="search-view" hidden><div class="search-head"><span class="section-kicker">SEARCH</span><h2 id="searchTitle">Results</h2></div><div id="searchResults" class="search-results"></div></section>
 </main>
 
-<!-- V24: Persistent Bottom Navigation -->
-<nav class="bottom-nav" id="bottomNav" aria-label="Main navigation">
-  <button class="bnav-item active" data-nav="home" aria-label="Home">
-    <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 001 1h3a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1h3a1 1 0 001-1V10"/></svg>
-    <span>Home</span>
-  </button>
-  <button class="bnav-item" data-nav="radar" aria-label="Radar">
-    <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><line x1="12" y1="2" x2="12" y2="6"/></svg>
-    <span>Radar</span>
-  </button>
-  <button class="bnav-item" data-nav="inbox" aria-label="Inbox">
-    <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-6l-2 3H10l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>
-    <span>Inbox</span>
-    <i class="bnav-badge" id="bnavInboxBadge" hidden></i>
-  </button>
-  <button class="bnav-item" data-nav="replay" aria-label="Replay">
-    <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/><circle cx="12" cy="12" r="1"/><polyline points="12 8 12 12 15 14"/></svg>
-    <span>Replay</span>
-  </button>
-  <button class="bnav-item" data-nav="search" aria-label="Search">
-    <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-    <span>Search</span>
-  </button>
+<!-- HisabKitab / Aetheria Mobile Floating Command Dock (5 core destinations) -->
+<nav class="bottom-nav" id="bottomNav" aria-label="Command Dock">
+  <div class="dock-container">
+    <button class="bnav-item active" data-nav="home" aria-label="Home">
+      <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 001 1h3a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1h3a1 1 0 001-1V10"/></svg>
+      <span>Home</span>
+    </button>
+    <button class="bnav-item" data-nav="insights" aria-label="Insights">
+      <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/><circle cx="15" cy="21" r="1"/></svg>
+      <span>Insights</span>
+      <i class="bnav-badge" id="bnavInsightsBadge" hidden></i>
+    </button>
+    <button class="bnav-item bnav-add" data-nav="add" aria-label="Add or Search">
+      <div class="bnav-add-btn">
+        <svg class="bnav-icon bnav-add-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </div>
+      <span>Add</span>
+    </button>
+    <button class="bnav-item" data-nav="plan" aria-label="Plan &amp; Replay">
+      <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><polygon points="12 7 13.5 11 17 12 13.5 13 12 17 10.5 13 7 12 10.5 11 12 7"/></svg>
+      <span>Plan</span>
+    </button>
+    <button class="bnav-item" data-nav="you" aria-label="You &amp; Settings">
+      <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span>You</span>
+    </button>
+  </div>
 </nav>
 
 <div id="storyModal" class="modal" aria-hidden="true"><div class="modal-backdrop" id="modalBackdrop"></div><section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle">

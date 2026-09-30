@@ -1239,15 +1239,15 @@ def _serialize_event(e,meta_map,score_override=None):
 
 
 def build_enriched():
-    cutoff=now()-EVENT_ACTIVE_HOURS*3600
+    active_cutoff=now()-EVENT_ACTIVE_HOURS*3600
+    retention_cutoff=now()-RETENTION_DAYS*86400
     con=None
     try:
         con=db_read()
-        rows=con.execute("SELECT * FROM events WHERE last_seen>? AND length(trim(title))>=8 ORDER BY last_seen DESC LIMIT ?",(cutoff,EVENT_POOL_LIMIT)).fetchall()
+        rows=con.execute("SELECT * FROM events WHERE last_seen>? AND length(trim(title))>=8 ORDER BY last_seen DESC LIMIT ?",(active_cutoff,EVENT_POOL_LIMIT)).fetchall()
         if not rows:
-            # Fallback: if no events match the active window (e.g. clock drift or quiet window),
-            # retrieve the most recent events available in the database instead of failing.
-            rows=con.execute("SELECT * FROM events WHERE length(trim(title))>=8 ORDER BY last_seen DESC LIMIT ?",(EVENT_POOL_LIMIT,)).fetchall()
+            # Fallback: keep strictly within the retention window, NEVER pull ancient 100+ day events into live snapshot
+            rows=con.execute("SELECT * FROM events WHERE last_seen>? AND length(trim(title))>=8 ORDER BY last_seen DESC LIMIT ?",(retention_cutoff,EVENT_POOL_LIMIT)).fetchall()
         if not rows:
             return []
         ids=[r["id"] for r in rows]
