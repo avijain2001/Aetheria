@@ -7,3 +7,5 @@ env/
 venv/
 *.sqlite
 *.db
+*.db-shm
+*.db-wal

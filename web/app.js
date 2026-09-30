@@ -95,9 +95,24 @@ function renderMarket(){
     if(x.available===false||x.price==null){
       return`<div class="market-card unavailable"><div class="m-card-header"><span class="m-card-name">${name}</span><small class="m-card-curr">${curr}</small></div><div class="m-card-body"><strong class="m-card-price">—</strong><span class="m-card-status">Closed / Syncing</span></div></div>`;
     }
-    const isUp=x.change!=null&&x.change>=0;
-    const changeClass=x.change==null?'flat':(isUp?'up':'down');
-    const changeText=x.change==null?'—':`${isUp?'▲ +':'▼ '}${Math.abs(x.change*100).toFixed(2)}%`;
+    const changeNum = x.change_num != null ? Number(x.change_num) : (x.change != null && x.price != null && x.previous_close ? Number(x.price) - Number(x.previous_close) : (x.change != null && x.price != null ? Number(x.price) * Number(x.change) : null));
+    const changePct = x.change != null ? Number(x.change) * 100 : null;
+
+    let changeText = '—';
+    let changeClass = 'flat';
+    if (changePct != null || changeNum != null) {
+      const isUp = (changeNum != null ? changeNum >= 0 : changePct >= 0);
+      changeClass = isUp ? 'up' : 'down';
+      const numStr = changeNum != null ? `${isUp ? '+' : ''}${changeNum.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '';
+      const pctStr = changePct != null ? `${isUp ? '+' : ''}${changePct.toFixed(2)}%` : '';
+      if (numStr && pctStr) {
+        changeText = `${isUp ? '▲' : '▼'} ${numStr} (${pctStr})`;
+      } else if (pctStr) {
+        changeText = `${isUp ? '▲' : '▼'} ${pctStr}`;
+      } else if (numStr) {
+        changeText = `${isUp ? '▲' : '▼'} ${numStr}`;
+      }
+    }
     return`<div class="market-card"><div class="m-card-header"><span class="m-card-name">${name}</span><span class="m-card-curr">${curr}</span></div><div class="m-card-body"><strong class="m-card-price">${formatMarket(x.price,x.symbol)}</strong><span class="m-card-badge ${changeClass}">${changeText}</span></div></div>`;
   }).join('');
   el.innerHTML=`<div class="market-bar"><div class="market-tabs">${tabs}</div><div class="market-source-note">${esc(activeGroup?.source||'')}</div></div><div class="market-active-grid">${items}</div>`;
@@ -218,7 +233,7 @@ function clearSearch(){state.searchMode=false;state.query='';state.events=[];$('
 let activeStoryId='';
 function renderEvidence(e,d){const x=d.evidence||{},st=x.state||e.status||'DEVELOPING',conf=pct(e.intelligence?.confidence),langs=(x.languages||[]).filter(Boolean).slice(0,7).join(' · ')||'—',conflicts=x.conflicts||[];$('modalEvidence').innerHTML=`<div class="truth-state truth-${st.toLowerCase()}"><b>${esc(st)}</b><span>${num(x.independent_sources)} independent sources</span></div><div><b>${num(x.reports)}</b><span>reports</span></div><div><b>${num(x.official)}</b><span>official</span></div><div><b>${conf}%</b><span>confidence</span></div><div><b>${esc(langs)}</b><span>languages</span></div>${conflicts.length?`<div class="evidence-warning"><b>CONFLICT</b><span>${conflicts.map(c=>esc(c.sources)).join(' · ')}</span></div>`:''}`}
 function renderAiBox(d){const local=d?.local_ai||null;$('modalAi').hidden=!local;if(!local){$('modalAi').innerHTML='';return}$('modalAi').innerHTML=`<span>AETHERIA INTELLIGENCE · LOCAL EVIDENCE ENGINE</span><b>${esc(local.summary||'Observed event synthesis is available.')}</b><p><strong>Why surfaced:</strong> ${esc(local.why||'Fresh event activity')}</p><p><strong>Evidence:</strong> ${esc(local.evidence_note||'Evidence drawn from the linked source set.')}</p><p><strong>Uncertainty:</strong> ${esc(local.uncertainty||'No additional uncertainty note is available.')}</p>`}
-async function openStory(id){if(!id)return;activeStoryId=id;telemetry(id,'open');$('storyModal').classList.add('open');$('storyModal').setAttribute('aria-hidden','false');$('modalTitle').textContent='Loading…';$('modalSummary').textContent='';$('modalEvidence').innerHTML='';$('modalContext').innerHTML='';$('modalImpact').innerHTML='';$('modalTimeline').innerHTML='';$('modalRelated').innerHTML='';$('modalFuture').innerHTML='';$('modalAi').innerHTML='';$('modalAi').hidden=true;$('knowledgeGapBody').hidden=true;$('knowledgeGapBody').innerHTML='';$('modalSources').innerHTML='';try{const d=await getJSON(`/api/event/${encodeURIComponent(id)}`);const e=d.event||{},src=d.sources||[],ctx=d.context||{};$('modalKicker').textContent=`LIVING STORY · ${e.topic||'WORLD'}`;$('modalTitle').textContent=e.title||'Untitled story';$('modalPublished').textContent=e.primary_published?`Published ${exactTime(e.primary_published)}`:'Publication time unavailable';renderReadingMemory(e);saveReading(e.id,e.last_seen||e.primary_published,e.title);renderEvidence(e,d);const vals={"WHY IT MATTERS":(ctx.why||[]).join(' · ')||'Fresh event activity',"INDIA LENS":(e.india_lens_reasons||[]).join(' · ')||'No direct India signal',"LIFE / LOCAL":(e.life_impact||e.personal_relevance||[]).slice(0,3).join(' · ')||'No measured personal or local pathway',"LAST CHANGE":ctx.latest_change||'No additional change note',"SOURCE MIX":`${num(e.sources)||0} linked reports · ${num(e.source_tiers?.official)||0} official`};$('modalContext').innerHTML=Object.entries(vals).map(([k,v])=>`<div><span>${k}</span><b>${esc(v)}</b></div>`).join('');$('modalSummary').textContent=e.summary||e.primary_description||'No article summary is available; source reports remain the primary evidence.';const personal=(e.personal_relevance||[]);$('modalPersonal').innerHTML=personal.length?`<div class="personal-head"><span>RELEVANCE LENS</span><em>Observed pathways</em></div><p>${esc(personal.join(' · '))}</p>`:'';renderAiBox(d);$('modalImpact').innerHTML=renderImpactDetail(d.impact_channels);$('modalTimeline').innerHTML=renderTimeline(d.timeline);$('modalRelated').innerHTML=renderRelated(d.related);$('modalFuture').innerHTML=renderFutureDetail(d.future_watch);$('modalSourceCount').textContent=`${src.length} report${src.length===1?'':'s'}`;$('modalSources').innerHTML=src.map(a=>{const u=validUrl(a.canonical_url)?`<a href="${esc(a.canonical_url)}" target="_blank" rel="noopener noreferrer">↗</a>`:'';const t=validUrl(a.canonical_url)?`<a href="${esc(a.canonical_url)}" target="_blank" rel="noopener noreferrer">${esc(a.title||'Source report')}</a>`:esc(a.title||'Source report');return`<div class="source-report"><i></i><div><h3>${t}</h3><p>${esc(a.domain||'source')} · ${a.published?`Published ${esc(exactTime(a.published))}`:'publication time unavailable'} · ${esc(a.tier||'publisher')} · ${esc(a.language||'')}</p></div>${u}</div>`}).join('')||'<div class="empty-state">No linked source reports.</div>';wireStoryRows('modalRelated')}catch(e){$('modalTitle').textContent='Story unavailable';$('modalSummary').textContent='The event could not be loaded. Please try again.'}}
+async function openStory(id){if(!id)return;activeStoryId=id;telemetry(id,'open');$('storyModal').classList.add('open');$('storyModal').setAttribute('aria-hidden','false');$('modalTitle').textContent='Loading…';$('modalSummary').textContent='';$('modalEvidence').innerHTML='';$('modalContext').innerHTML='';$('modalImpact').innerHTML='';$('modalTimeline').innerHTML='';$('modalRelated').innerHTML='';$('modalFuture').innerHTML='';$('modalAi').innerHTML='';$('modalAi').hidden=true;$('knowledgeGapBody').hidden=true;$('knowledgeGapBody').innerHTML='';$('modalSources').innerHTML='';try{const d=await getJSON(`/api/event/${encodeURIComponent(id)}`);const e=d.event||{},src=d.sources||[],ctx=d.context||{};$('modalKicker').textContent=`LIVING STORY · ${e.topic||'WORLD'}`;$('modalTitle').textContent=e.title||'Untitled story';$('modalPublished').textContent=e.primary_published?`Published ${exactTime(e.primary_published)}`:'Publication time unavailable';renderReadingMemory(e);saveReading(e.id,e.last_seen||e.primary_published,e.title);updateModalFollowBtn(e.id);$('modalFollowBtn').onclick=()=>{toggleFollow(e.id);updateModalFollowBtn(e.id)};renderEvidence(e,d);const vals={"WHY IT MATTERS":(ctx.why||[]).join(' · ')||'Fresh event activity',"INDIA LENS":(e.india_lens_reasons||[]).join(' · ')||'No direct India signal',"LIFE / LOCAL":(e.life_impact||e.personal_relevance||[]).slice(0,3).join(' · ')||'No measured personal or local pathway',"LAST CHANGE":ctx.latest_change||'No additional change note',"SOURCE MIX":`${num(e.sources)||0} linked reports · ${num(e.source_tiers?.official)||0} official`};$('modalContext').innerHTML=Object.entries(vals).map(([k,v])=>`<div><span>${k}</span><b>${esc(v)}</b></div>`).join('');$('modalSummary').textContent=e.summary||e.primary_description||'No article summary is available; source reports remain the primary evidence.';const personal=(e.personal_relevance||[]);$('modalPersonal').innerHTML=personal.length?`<div class="personal-head"><span>RELEVANCE LENS</span><em>Observed pathways</em></div><p>${esc(personal.join(' · '))}</p>`:'';renderAiBox(d);$('modalImpact').innerHTML=renderImpactDetail(d.impact_channels);$('modalTimeline').innerHTML=renderTimeline(d.timeline);$('modalRelated').innerHTML=renderRelated(d.related);$('modalFuture').innerHTML=renderFutureDetail(d.future_watch);$('modalSourceCount').textContent=`${src.length} report${src.length===1?'':'s'}`;$('modalSources').innerHTML=src.map(a=>{const u=validUrl(a.canonical_url)?`<a href="${esc(a.canonical_url)}" target="_blank" rel="noopener noreferrer">↗</a>`:'';const t=validUrl(a.canonical_url)?`<a href="${esc(a.canonical_url)}" target="_blank" rel="noopener noreferrer">${esc(a.title||'Source report')}</a>`:esc(a.title||'Source report');return`<div class="source-report"><i></i><div><h3>${t}</h3><p>${esc(a.domain||'source')} · ${a.published?`Published ${esc(exactTime(a.published))}`:'publication time unavailable'} · ${esc(a.tier||'publisher')} · ${esc(a.language||'')}</p></div>${u}</div>`}).join('')||'<div class="empty-state">No linked source reports.</div>';wireStoryRows('modalRelated')}catch(e){$('modalTitle').textContent='Story unavailable';$('modalSummary').textContent='The event could not be loaded. Please try again.'}}
 function closeStory(){$('storyModal').classList.remove('open');$('storyModal').setAttribute('aria-hidden','true');activeStoryId=''}
 async function openKnowledgeGap(){if(!activeStoryId)return;$('knowledgeBtn').disabled=true;$('knowledgeBtn').textContent='Building context…';try{const d=await getJSON(`/api/knowledge-gap/${encodeURIComponent(activeStoryId)}`);const b=d.background||[];$('knowledgeGapBody').hidden=false;$('knowledgeGapBody').innerHTML=`<p>${esc(d.gap||'This story can be easier to follow with the surrounding context.')}</p>${b.length?`<div class="gap-links">${b.map(x=>`<button data-event="${esc(x.id)}">${esc(x.title)}</button>`).join('')}</div>`:'<small>No earlier related event is available in the retained story history.</small>'}`;wireStoryRows('knowledgeGapBody')}catch{$('knowledgeGapBody').hidden=false;$('knowledgeGapBody').innerHTML='<p>Background context is not available for this story yet.</p>'}finally{$('knowledgeBtn').disabled=false;$('knowledgeBtn').textContent='Give me the missing context'}}
 function radarStore(){try{return JSON.parse(localStorage.getItem('aetheria-radars')||'[]')}catch{return[]}}
@@ -239,17 +254,212 @@ function toggleRadar(open){$('radarDrawer').classList.toggle('open',open);$('rad
 function toggleInbox(open){$('inboxDrawer').classList.toggle('open',open);$('inboxDrawer').setAttribute('aria-hidden',open?'false':'true');if(open)renderInbox()}
 function toggleReplay(open){$('replayModal').classList.toggle('open',open);$('replayModal').setAttribute('aria-hidden',open?'false':'true')}
 function toast(t){const x=$('toast');x.textContent=t;x.classList.add('show');clearTimeout(window.__toast);window.__toast=setTimeout(()=>x.classList.remove('show'),1800)}
-$('refresh').onclick=()=>{toast('Refreshing the world model…');refresh()};$('systemBtn').onclick=()=>toggleDrawer(true);$('drawerClose').onclick=()=>toggleDrawer(false);$('drawerBackdrop').onclick=()=>toggleDrawer(false);$('modalClose').onclick=closeStory;$('modalBackdrop').onclick=closeStory;$('knowledgeBtn').onclick=openKnowledgeGap;$('tickerBtn').onclick=()=>{const id=$('tickerBtn').dataset.event;if(id)openStory(id)};$('loadMore').onclick=()=>{state.depth=Math.min(120,state.depth+10);persistUi();renderFeed()};$('clearSearch').onclick=clearSearch;$('search').addEventListener('compositionstart',()=>state.composing=true);$('search').addEventListener('compositionend',e=>{state.composing=false;runSuggest(e.target.value);runSearch(e.target.value)});$('search').addEventListener('input',e=>{if(state.composing)return;const raw=String(e.currentTarget.value??'');runSuggest(raw);clearTimeout(state.searchTimer);state.searchTimer=setTimeout(()=>{if($('search').value===raw)runSearch(raw)},220)});$('search').addEventListener('focus',()=>{if($('search').value.trim())runSuggest($('search').value)});$('search').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();hideSuggestions();runSearch(e.target.value)}if(e.key==='Escape')hideSuggestions()});document.addEventListener('click',e=>{if(!$('searchShell').contains(e.target))hideSuggestions()});document.addEventListener('keydown',e=>{if(e.key==='/'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){e.preventDefault();$('search').focus()}if(e.key==='Escape'){if($('storyModal').classList.contains('open'))closeStory();else if($('replayModal').classList.contains('open'))toggleReplay(false);else if($('radarDrawer').classList.contains('open'))toggleRadar(false);else if($('inboxDrawer').classList.contains('open'))toggleInbox(false);else if($('systemDrawer').classList.contains('open'))toggleDrawer(false)}});$('theme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light';localStorage.setItem('aetheria-theme',document.documentElement.dataset.theme)};document.querySelectorAll('#depthSwitch button').forEach(b=>b.onclick=()=>{state.depth=num(b.dataset.depth);document.querySelectorAll('#depthSwitch button').forEach(x=>x.classList.toggle('active',x===b));persistUi();renderFeed()});$('stackPrev').onclick=()=>moveStack(-1);$('stackNext').onclick=()=>moveStack(1);$('storyStack').addEventListener('pointerdown',e=>{const x=e.clientX;const up=ev=>{const dx=ev.clientX-x;if(Math.abs(dx)>35)moveStack(dx<0?1:-1);document.removeEventListener('pointerup',up)};document.addEventListener('pointerup',up)});$('radarBtn').onclick=()=>toggleRadar(true);$('radarBackdrop').onclick=()=>toggleRadar(false);$('radarClose').onclick=()=>toggleRadar(false);$('radarAddBtn').onclick=addRadar;$('radarInput').addEventListener('keydown',e=>{if(e.key==='Enter')addRadar()});$('inboxBtn').onclick=()=>toggleInbox(true);$('inboxBackdrop').onclick=()=>toggleInbox(false);$('inboxClose').onclick=()=>toggleInbox(false);$('clearInbox').onclick=clearInbox;$('replayBtn').onclick=()=>{toggleReplay(true);if(!$('replayDate').value)$('replayDate').value=todayIndia();runReplay()};$('replayBackdrop').onclick=()=>toggleReplay(false);$('replayClose').onclick=()=>toggleReplay(false);$('replayRun').onclick=runReplay;
-/* HisabKitab / Aetheria Command Dock wiring (5 destinations: home, insights, add, plan, you) */
+/* ==================== AETHERIA FOLLOW UP STORE & ENGINE ==================== */
+function followStore(){
+  try{return JSON.parse(localStorage.getItem('aetheria-follows')||'[]')}catch{return[]}
+}
+function saveFollows(rows){
+  try{localStorage.setItem('aetheria-follows',JSON.stringify(rows))}catch{}
+}
+function isFollowed(eid){
+  return followStore().includes(eid);
+}
+function updateModalFollowBtn(eid){
+  const btn=$('modalFollowBtn');
+  const txt=$('modalFollowText');
+  if(!btn||!txt)return;
+  const followed=isFollowed(eid);
+  btn.classList.toggle('active',followed);
+  txt.textContent=followed?'✓ Following':'+ Follow Event';
+}
+async function toggleFollow(eid){
+  if(!eid)return;
+  const list=followStore();
+  const index=list.indexOf(eid);
+  const willFollow=index<0;
+  if(willFollow){
+    list.unshift(eid);
+  }else{
+    list.splice(index,1);
+  }
+  saveFollows(list);
+  updateModalFollowBtn(eid);
+  toast(willFollow?'Following event — Aetheria is monitoring':'Unfollowed event');
+  try{
+    await fetch('/api/follow',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({session:state.session,event_id:eid,action:willFollow?'follow':'unfollow'})
+    });
+  }catch{}
+  loadFollowUp();
+}
+
+let followUpData = null;
+let activeFollowTab = 'all';
+
+async function loadFollowUp(){
+  const fIds=followStore();
+  try{
+    const d=await getJSON(`/api/follow-up?session=${encodeURIComponent(state.session)}&followed_ids=${encodeURIComponent(fIds.join(','))}`);
+    followUpData=d;
+    renderFollowUpView();
+    const badge=$('bnavFollowBadge');
+    if(badge){
+      const unread=d.digest?.count||0;
+      badge.hidden=unread===0;
+    }
+  }catch(e){
+    const listEl=$('followUpList');
+    if(listEl)listEl.innerHTML='<div class="empty-state">Unable to load followed events right now.</div>';
+  }
+}
+
+function renderFollowUpView(){
+  if(!followUpData)return;
+  const d=followUpData;
+  const digest=d.digest||{};
+  
+  if($('digestChangesCount')) $('digestChangesCount').textContent = `${num(digest.count)} update${num(digest.count)===1?'':'s'}`;
+  if($('digestSummarySentence')) $('digestSummarySentence').textContent = digest.summary_sentence||'Since you last checked, no new changes were detected.';
+  if($('digestReassurance')) $('digestReassurance').textContent = digest.trailing_sentence||"Nothing else important changed in the stories you're following.";
+  
+  const listEl=$('digestList');
+  if(listEl){
+    if((digest.items||[]).length){
+      listEl.innerHTML=digest.items.map((it,idx)=>`
+        <li class="digest-item">
+          <span class="digest-num">${idx+1}</span>
+          <div>
+            <strong data-event="${esc(it.id)}">${esc(it.title)}</strong>
+            <span> — ${esc(it.delta||'New development observed.')}</span>
+          </div>
+        </li>
+      `).join('');
+      wireStoryRows('digestList');
+    } else {
+      listEl.innerHTML='';
+    }
+  }
+
+  const allList=[...(d.revived||[]), ...(d.active||[]), ...(d.quiet||[])];
+  if($('countFollowAll')) $('countFollowAll').textContent=allList.length;
+  if($('countFollowActive')) $('countFollowActive').textContent=(d.active||[]).length;
+  if($('countFollowQuiet')) $('countFollowQuiet').textContent=(d.quiet||[]).length;
+  if($('countFollowRevived')) $('countFollowRevived').textContent=(d.revived||[]).length;
+  if($('countFollowSuggest')) $('countFollowSuggest').textContent=(d.suggestions||[]).length;
+
+  const mainListEl=$('followUpList');
+  if(!mainListEl)return;
+
+  if(activeFollowTab==='suggestions'){
+    const sug=d.suggestions||[];
+    if(!sug.length){
+      mainListEl.innerHTML='<div class="empty-state">No new suggestions at this moment.</div>';
+      return;
+    }
+    mainListEl.innerHTML=sug.map(s=>`
+      <div class="suggestion-card">
+        <div class="suggestion-kicker"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> AETHERIA SUGGESTS · HIGH MOMENTUM</div>
+        <h3 data-event="${esc(s.id)}">${esc(s.title)}</h3>
+        <p class="why-reason"><strong>Why follow?</strong> ${esc(s.why_suggest)}</p>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">${esc(s.summary)}</p>
+        <div>
+          <button class="btn-follow-suggest" data-follow-eid="${esc(s.id)}">+ Follow Story</button>
+          <button class="btn-dismiss-suggest" data-dismiss-eid="${esc(s.id)}">Dismiss</button>
+        </div>
+      </div>
+    `).join('');
+    mainListEl.querySelectorAll('[data-follow-eid]').forEach(b=>b.onclick=()=>{toggleFollow(b.dataset.followEid);b.closest('.suggestion-card').remove()});
+    mainListEl.querySelectorAll('[data-dismiss-eid]').forEach(b=>b.onclick=()=>{b.closest('.suggestion-card').remove()});
+    wireStoryRows('followUpList');
+    return;
+  }
+
+  let displayItems=[];
+  if(activeFollowTab==='all') displayItems=allList;
+  else if(activeFollowTab==='active') displayItems=d.active||[];
+  else if(activeFollowTab==='quiet') displayItems=d.quiet||[];
+  else if(activeFollowTab==='revived') displayItems=d.revived||[];
+
+  if(!displayItems.length){
+    mainListEl.innerHTML=`<div class="empty-state">${activeFollowTab==='all'?'You are not following any stories yet. Check SUGGESTED to follow important events.':`No stories currently in ${activeFollowTab.toUpperCase()} status.`}</div>`;
+    return;
+  }
+
+  mainListEl.innerHTML=displayItems.map(it=>{
+    let badgeClass='lifecycle-active';
+    let badgeText='🔴 ACTIVE';
+    let subText=`Updated ${age(it.last_seen)} ago`;
+
+    if(it.lifecycle==='REVIVED'){
+      badgeClass='lifecycle-revived';
+      badgeText='🔵 STORY REVIVED';
+      subText=`Revived after ${it.revived_gap_days||'several'} days of low activity`;
+    } else if(it.lifecycle==='QUIET'||it.lifecycle==='COOLING'){
+      badgeClass='lifecycle-quiet';
+      badgeText='🟡 QUIET — STILL IMPORTANT';
+      subText=`No major developments for ${it.days_quiet||'several'} days · Coverage ↓ ${it.coverage_drop_pct||65}% from peak`;
+    }
+
+    return `
+      <article class="followup-card" data-event="${esc(it.id)}">
+        <div class="followup-badge-row">
+          <span class="lifecycle-badge ${badgeClass}">${badgeText}</span>
+          <span class="followup-card-time">${esc(subText)}</span>
+        </div>
+        <h3 data-open-event="${esc(it.id)}">${esc(it.title)}</h3>
+        <div class="followup-delta-box">
+          <span class="delta-label">What changed?</span>
+          <p class="delta-content">${esc(it.what_changed||'Latest development verified across independent reporting.')}</p>
+        </div>
+        <div class="followup-why-box">
+          <b>Previous state:</b> <span>${esc(it.previous_state||'Baseline monitoring.')}</span>
+        </div>
+        <div class="followup-why-box">
+          <b>Why Aetheria is still monitoring:</b> <span>${esc(it.why_monitoring||'Underlying event remains unresolved.')}</span>
+        </div>
+        <div class="followup-actions">
+          <button class="btn-read-history" data-open-event="${esc(it.id)}">Read Story &amp; Evidence ↗</button>
+          <button class="btn-unfollow" data-unfollow-eid="${esc(it.id)}">Stop Following</button>
+        </div>
+      </article>
+    `;
+  }).join('');
+
+  mainListEl.querySelectorAll('[data-open-event]').forEach(b=>b.onclick=()=>openStory(b.dataset.openEvent));
+  mainListEl.querySelectorAll('[data-unfollow-eid]').forEach(b=>b.onclick=()=>toggleFollow(b.dataset.unfollowEid));
+}
+
+function toggleFollowUp(open){
+  const m=$('followUpModal');
+  if(!m)return;
+  m.classList.toggle('open',open);
+  m.setAttribute('aria-hidden',open?'false':'true');
+  if(open){
+    loadFollowUp();
+  }
+}
+
+$('refresh').onclick=()=>{toast('Refreshing the world model…');refresh()};$('systemBtn').onclick=()=>toggleDrawer(true);$('drawerClose').onclick=()=>toggleDrawer(false);$('drawerBackdrop').onclick=()=>toggleDrawer(false);$('modalClose').onclick=closeStory;$('modalBackdrop').onclick=closeStory;$('knowledgeBtn').onclick=openKnowledgeGap;$('tickerBtn').onclick=()=>{const id=$('tickerBtn').dataset.event;if(id)openStory(id)};$('loadMore').onclick=()=>{state.depth=Math.min(120,state.depth+10);persistUi();renderFeed()};$('clearSearch').onclick=clearSearch;$('search').addEventListener('compositionstart',()=>state.composing=true);$('search').addEventListener('compositionend',e=>{state.composing=false;runSuggest(e.target.value);runSearch(e.target.value)});$('search').addEventListener('input',e=>{if(state.composing)return;const raw=String(e.currentTarget.value??'');runSuggest(raw);clearTimeout(state.searchTimer);state.searchTimer=setTimeout(()=>{if($('search').value===raw)runSearch(raw)},220)});$('search').addEventListener('focus',()=>{if($('search').value.trim())runSuggest($('search').value)});$('search').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();hideSuggestions();runSearch(e.target.value)}if(e.key==='Escape')hideSuggestions()});document.addEventListener('click',e=>{if(!$('searchShell').contains(e.target))hideSuggestions()});document.addEventListener('keydown',e=>{if(e.key==='/'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){e.preventDefault();$('search').focus()}if(e.key==='Escape'){if($('storyModal').classList.contains('open'))closeStory();else if($('followUpModal')?.classList.contains('open'))toggleFollowUp(false);else if($('replayModal').classList.contains('open'))toggleReplay(false);else if($('radarDrawer').classList.contains('open'))toggleRadar(false);else if($('inboxDrawer').classList.contains('open'))toggleInbox(false);else if($('systemDrawer').classList.contains('open'))toggleDrawer(false)}});$('theme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light';localStorage.setItem('aetheria-theme',document.documentElement.dataset.theme)};document.querySelectorAll('#depthSwitch button').forEach(b=>b.onclick=()=>{state.depth=num(b.dataset.depth);document.querySelectorAll('#depthSwitch button').forEach(x=>x.classList.toggle('active',x===b));persistUi();renderFeed()});$('stackPrev').onclick=()=>moveStack(-1);$('stackNext').onclick=()=>moveStack(1);$('storyStack').addEventListener('pointerdown',e=>{const x=e.clientX;const up=ev=>{const dx=ev.clientX-x;if(Math.abs(dx)>35)moveStack(dx<0?1:-1);document.removeEventListener('pointerup',up)};document.addEventListener('pointerup',up)});$('radarBtn').onclick=()=>toggleRadar(true);$('radarBackdrop').onclick=()=>toggleRadar(false);$('radarClose').onclick=()=>toggleRadar(false);$('radarAddBtn').onclick=addRadar;$('radarInput').addEventListener('keydown',e=>{if(e.key==='Enter')addRadar()});$('inboxBtn').onclick=()=>toggleInbox(true);$('inboxBackdrop').onclick=()=>toggleInbox(false);$('inboxClose').onclick=()=>toggleInbox(false);$('clearInbox').onclick=clearInbox;$('replayBtn').onclick=()=>{toggleReplay(true);if(!$('replayDate').value)$('replayDate').value=todayIndia();runReplay()};$('replayBackdrop').onclick=()=>toggleReplay(false);$('replayClose').onclick=()=>toggleReplay(false);$('replayRun').onclick=runReplay;
+$('followUpClose')?.addEventListener('click',()=>toggleFollowUp(false));$('followUpBackdrop')?.addEventListener('click',()=>toggleFollowUp(false));
+$('followUpTabs')?.querySelectorAll('.followup-tab-btn').forEach(btn=>{
+  btn.onclick=()=>{
+    activeFollowTab=btn.dataset.ftab;
+    $('followUpTabs').querySelectorAll('.followup-tab-btn').forEach(b=>b.classList.toggle('active',b===btn));
+    renderFollowUpView();
+  };
+});
+/* HisabKitab / Aetheria Command Dock wiring (5 destinations: home, radar, followup, replay, more) */
 document.querySelectorAll('.bnav-item').forEach(b=>b.onclick=()=>{
   const nav=b.dataset.nav;
   document.querySelectorAll('.bnav-item').forEach(x=>x.classList.toggle('active',x===b));
   if(nav==='home'){if(state.searchMode)clearSearch();state.topic='Top';state.stackIndex=0;persistUi();render();window.scrollTo({top:0,behavior:'smooth'})}
-  if(nav==='insights')toggleRadar(true);
-  if(nav==='add'){if(state.searchMode){$('search').focus()}else{window.scrollTo({top:0,behavior:'smooth'});setTimeout(()=>$('search').focus(),140)}}
-  if(nav==='plan'){toggleReplay(true);if(!$('replayDate').value)$('replayDate').value=todayIndia();runReplay()}
-  if(nav==='you')toggleDrawer(true);
+  if(nav==='radar')toggleRadar(true);
+  if(nav==='followup')toggleFollowUp(true);
+  if(nav==='replay'){toggleReplay(true);if(!$('replayDate').value)$('replayDate').value=todayIndia();runReplay()}
+  if(nav==='more')toggleDrawer(true);
 });
 /* V24: Brand click always resets to home */
 $('brandHome').addEventListener('click',e=>{e.preventDefault();if(state.searchMode)clearSearch();state.topic='Top';state.stackIndex=0;persistUi();render();window.scrollTo({top:0,behavior:'smooth'});document.querySelectorAll('.bnav-item').forEach(x=>x.classList.toggle('active',x.dataset.nav==='home'))});
-const savedTheme=localStorage.getItem('aetheria-theme');if(savedTheme)document.documentElement.dataset.theme=savedTheme;restoreUi();hydrateCached();renderInboxCount();setInterval(refresh,7000);setInterval(async()=>{try{const m=await getJSON("/api/market",null,6500);state.market=m;renderMarket()}catch{}},120000);setInterval(checkRadars,60000);setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})},1000);startTicker();refresh();
+const savedTheme=localStorage.getItem('aetheria-theme');if(savedTheme)document.documentElement.dataset.theme=savedTheme;restoreUi();hydrateCached();renderInboxCount();loadFollowUp();setInterval(refresh,7000);setInterval(async()=>{try{const m=await getJSON("/api/market",null,6500);state.market=m;renderMarket()}catch{}},120000);setInterval(checkRadars,60000);setInterval(loadFollowUp,60000);setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})},1000);startTicker();refresh();

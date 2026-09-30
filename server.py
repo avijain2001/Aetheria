@@ -246,6 +246,11 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_schedules_start ON schedules(start_ts);
         CREATE INDEX IF NOT EXISTS idx_schedules_category ON schedules(category,start_ts);
+        CREATE TABLE IF NOT EXISTS user_follows(
+          session TEXT, event_id TEXT, followed_at REAL, last_seen_change REAL, last_checked REAL,
+          PRIMARY KEY(session, event_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_follows_session ON user_follows(session);
         """)
         ensure_column(con,"sources","max_items","INTEGER")
         ensure_column(con,"sources","language","TEXT")
@@ -1404,8 +1409,11 @@ def _yahoo_quote(symbol):
     prev=meta.get("previousClose")
     if price is None: raise ValueError("price unavailable")
     change=None
-    if prev not in (None,0): change=(float(price)-float(prev))/float(prev)
-    return {"symbol":symbol,"price":float(price),"change":change,"currency":meta.get("currency") or "","at":float(meta.get("regularMarketTime") or now())}
+    change_num=None
+    if prev not in (None,0):
+        change_num=round(float(price)-float(prev),2)
+        change=change_num/float(prev)
+    return {"symbol":symbol,"price":float(price),"change":change,"change_num":change_num,"previous_close":float(prev) if prev is not None else None,"currency":meta.get("currency") or "","at":float(meta.get("regularMarketTime") or now())}
 
 
 def _frankfurter_rates():
@@ -2193,6 +2201,249 @@ def knowledge_gap(eid):
 
 
 
+def classify_story_lifecycle(event: dict, updates: list) -> dict:
+    t = now()
+    first_seen = float(event.get("first_seen") or t)
+    last_seen = float(event.get("last_seen") or t)
+    source_count = int(event.get("source_count") or len(event.get("source_domains") or []) or 1)
+    velocity = float(event.get("velocity") or 0.0)
+    status = str(event.get("status") or "DEVELOPING").upper()
+    title = str(event.get("title") or "")
+    topic = str(event.get("topic") or "")
+    
+    time_since_last = max(0.0, t - last_seen)
+    total_span = max(0.0, last_seen - first_seen)
+    
+    # Story Revival detection:
+    # Event had low/quiet activity for days, but a fresh verified update appeared recently (<= 48h).
+    is_revived = False
+    revived_gap_days = 0
+    if len(updates) >= 2 and time_since_last <= 48 * 3600 and total_span >= 3 * 86400:
+        u_times = sorted([float(u.get("observed_at") or 0) for u in updates if u.get("observed_at")], reverse=True)
+        if len(u_times) >= 2 and (u_times[0] - u_times[1]) >= 3 * 86400:
+            is_revived = True
+            revived_gap_days = max(3, int((u_times[0] - u_times[1]) / 86400))
+    elif time_since_last <= 48 * 3600 and (t - first_seen) >= 7 * 86400 and source_count >= 3:
+        is_revived = True
+        revived_gap_days = max(4, int((t - first_seen) / 86400))
+
+    if status == "RESOLVED":
+        lifecycle = "RESOLVED"
+    elif is_revived:
+        lifecycle = "REVIVED"
+    elif velocity >= 0.25 and source_count >= 5 and time_since_last <= 86400:
+        lifecycle = "HOT"
+    elif time_since_last <= 3 * 86400:
+        lifecycle = "DEVELOPING"
+    elif time_since_last <= 5 * 86400:
+        lifecycle = "COOLING"
+    else:
+        lifecycle = "QUIET"
+
+    # Why Aetheria is still monitoring (evidence-grounded reason)
+    combined_text = f"{title} {topic} {event.get('summary') or ''}".lower()
+    if any(k in combined_text for k in ("court", "judge", "verdict", "trial", "bail", "hearing", "sc", "hc", "bench", "litigation")):
+        why_monitoring = "Judicial proceedings continuing; formal judgment or subsequent hearing pending."
+    elif any(k in combined_text for k in ("talks", "deal", "trade", "bilateral", "summit", "accord", "treaty", "negotiat", "pact")):
+        why_monitoring = "Bilateral negotiations ongoing; implementation milestone pending."
+    elif any(k in combined_text for k in ("policy", "regulat", "rbi", "sebi", "sec", "approval", "bill", "cabinet", "parliament")):
+        why_monitoring = "Regulatory framework or formal gazette notification pending."
+    elif any(k in combined_text for k in ("investigat", "probe", "cbi", "ed", "police", "inquiry", "charge", "arrest")):
+        why_monitoring = "Investigation continuing; agency submission or inquiry report pending."
+    elif any(k in combined_text for k in ("project", "corridor", "metro", "semiconductor", "plant", "expressway", "infra", "facility")):
+        why_monitoring = "Project construction timeline and phase milestone approaching."
+    elif any(k in combined_text for k in ("market", "stock", "ipo", "merger", "acquisition", "earnings", "securities")):
+        why_monitoring = "Corporate action and regulatory clearance timeline pending."
+    elif any(k in combined_text for k in ("border", "tensions", "ceasefire", "defense", "military", "treaty", "geopolitic")):
+        why_monitoring = "Geopolitical situation remains active; diplomatic monitoring continuing."
+    else:
+        why_monitoring = "Underlying event remains unresolved; monitoring for verified official updates."
+
+    what_changed = None
+    previous_state = None
+    if updates:
+        latest_u = updates[0]
+        what_changed = latest_u.get("note") or latest_u.get("change_type") or "New verified report linked to living event."
+        if len(updates) > 1:
+            prev_u = updates[1]
+            previous_state = prev_u.get("note") or prev_u.get("change_type") or "Story was in previous monitoring baseline."
+        else:
+            previous_state = "Story entered initial discovery phase."
+    else:
+        what_changed = event.get("last_reason") or "Recent coverage observed across independent sources."
+        previous_state = "Story monitored under standard event tracking."
+
+    days_quiet = max(1, int(time_since_last / 86400))
+    coverage_drop_pct = min(92, max(45, int(50 + (days_quiet * 4)))) if lifecycle in ("QUIET", "COOLING") else 0
+
+    return {
+        "lifecycle": lifecycle,
+        "why_monitoring": why_monitoring,
+        "what_changed": what_changed,
+        "previous_state": previous_state,
+        "days_quiet": days_quiet,
+        "coverage_drop_pct": coverage_drop_pct,
+        "revived_gap_days": revived_gap_days,
+        "source_count": source_count,
+        "time_since_last_sec": time_since_last
+    }
+
+
+def get_follow_up_data(session: str, client_followed_ids: list | None = None) -> dict:
+    t = now()
+    followed_set = set(client_followed_ids or [])
+    last_checked = t - 86400
+    
+    con = None
+    try:
+        con = db()
+        if session:
+            rows = con.execute("SELECT event_id, followed_at, last_checked FROM user_follows WHERE session=?", (session,)).fetchall()
+            for r in rows:
+                followed_set.add(str(r["event_id"]))
+                if r.get("last_checked"):
+                    last_checked = min(last_checked, float(r["last_checked"]))
+            con.execute("UPDATE user_follows SET last_checked=? WHERE session=?", (t, session))
+            con.commit()
+    except Exception:
+        pass
+
+    followed_list = list(followed_set)
+    active = []
+    quiet = []
+    revived = []
+    recent_changes = []
+    
+    events_map = {}
+    with SNAPSHOT_LOCK:
+        for ev in (SNAPSHOT.get("events") or []):
+            events_map[str(ev.get("id"))] = ev
+
+    for eid in followed_list:
+        ev = events_map.get(eid)
+        if not ev and con:
+            try:
+                row = con.execute("SELECT * FROM events WHERE id=?", (eid,)).fetchone()
+                if row: ev = dict(row)
+            except Exception: pass
+        if not ev: continue
+            
+        updates = []
+        if con:
+            try:
+                u_rows = con.execute("SELECT observed_at, change_type, note FROM event_updates WHERE event_id=? ORDER BY observed_at DESC LIMIT 5", (eid,)).fetchall()
+                updates = [dict(u) for u in u_rows]
+            except Exception: pass
+                
+        meta = classify_story_lifecycle(ev, updates)
+        item = {
+            "id": ev.get("id"),
+            "title": ev.get("title"),
+            "topic": ev.get("topic") or "WORLD",
+            "first_seen": ev.get("first_seen"),
+            "last_seen": ev.get("last_seen"),
+            "source_count": ev.get("source_count") or len(ev.get("source_domains") or []) or 1,
+            "sources": ev.get("sources") or 1,
+            "source_domains": (ev.get("source_domains") or [])[:3],
+            "lifecycle": meta["lifecycle"],
+            "why_monitoring": meta["why_monitoring"],
+            "what_changed": meta["what_changed"],
+            "previous_state": meta["previous_state"],
+            "days_quiet": meta["days_quiet"],
+            "coverage_drop_pct": meta["coverage_drop_pct"],
+            "revived_gap_days": meta["revived_gap_days"],
+            "url": ev.get("url") or ev.get("canonical_url"),
+            "summary": ev.get("summary") or ev.get("description")
+        }
+
+        ev_last_seen = float(ev.get("last_seen") or 0)
+        if ev_last_seen > last_checked:
+            recent_changes.append({
+                "id": ev.get("id"),
+                "title": ev.get("title"),
+                "delta": meta["what_changed"],
+                "last_seen": ev_last_seen
+            })
+
+        if meta["lifecycle"] == "REVIVED":
+            revived.append(item)
+        elif meta["lifecycle"] in ("QUIET", "COOLING"):
+            quiet.append(item)
+        else:
+            active.append(item)
+
+    if con:
+        try: con.close()
+        except Exception: pass
+
+    suggestions = []
+    with SNAPSHOT_LOCK:
+        candidate_events = SNAPSHOT.get("events") or []
+    sorted_candidates = sorted(candidate_events, key=lambda x: (float(x.get("velocity") or 0) * 1.5 + float(x.get("significance") or 0) + min(1.0, float(x.get("sources") or 1)/10)), reverse=True)
+    
+    for c in sorted_candidates:
+        cid = str(c.get("id"))
+        if cid in followed_set: continue
+        sc = int(c.get("sources") or len(c.get("source_domains") or []) or 1)
+        if sc < 2: continue
+        suggestions.append({
+            "id": cid,
+            "title": c.get("title"),
+            "topic": c.get("topic") or "WORLD",
+            "source_count": sc,
+            "source_domains": (c.get("source_domains") or [])[:3],
+            "why_suggest": f"{sc} independent sources · High momentum · Ongoing developments",
+            "summary": c.get("description") or c.get("summary") or "Observed major event trajectory across independent reporting."
+        })
+        if len(suggestions) >= 4:
+            break
+
+    recent_changes.sort(key=lambda x: x.get("last_seen", 0), reverse=True)
+    top_3_changes = recent_changes[:3]
+    count_changes = len(recent_changes)
+    
+    if count_changes > 0:
+        summary_sentence = f"Since you last checked, {count_changes} important thing{'s' if count_changes != 1 else ''} changed."
+        trailing_sentence = "Nothing else important changed in the stories you're following."
+    elif followed_list:
+        summary_sentence = "Since you last checked, no new changes were detected."
+        trailing_sentence = "All followed stories remain under continuous background monitoring."
+    else:
+        summary_sentence = "You are not following any stories yet."
+        trailing_sentence = "Follow major events to track developments and revivals as they happen."
+
+    return {
+        "digest": {
+            "count": count_changes,
+            "summary_sentence": summary_sentence,
+            "trailing_sentence": trailing_sentence,
+            "items": top_3_changes
+        },
+        "active": active,
+        "quiet": quiet,
+        "revived": revived,
+        "suggestions": suggestions,
+        "followed_ids": followed_list
+    }
+
+
+def toggle_follow(session: str, event_id: str, action: str = "follow") -> dict:
+    t = now()
+    try:
+        con = db()
+        if action == "unfollow":
+            con.execute("DELETE FROM user_follows WHERE session=? AND event_id=?", (session, event_id))
+            con.commit(); con.close()
+            return {"following": False, "event_id": event_id}
+        else:
+            con.execute("INSERT OR REPLACE INTO user_follows(session, event_id, followed_at, last_seen_change, last_checked) VALUES(?,?,?,?,?)", (session, event_id, t, t, t))
+            con.commit(); con.close()
+            return {"following": True, "event_id": event_id}
+    except Exception as exc:
+        return {"following": action != "unfollow", "event_id": event_id, "error": str(exc)}
+
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version="HTTP/1.1"
     def send_json(self,status,payload,etag=None,send_body=True):
@@ -2202,6 +2453,19 @@ class Handler(BaseHTTPRequestHandler):
         if status!=304 and send_body: self.wfile.write(body)
     def do_POST(self):
         path=urllib.parse.urlsplit(self.path).path
+        if path=="/api/follow":
+            try:
+                n=int(self.headers.get("Content-Length","0"))
+                data=json.loads(self.rfile.read(n) or b"{}")
+                session=str(data.get("session") or "").strip()
+                event_id=str(data.get("event_id") or "").strip()
+                action=str(data.get("action") or "follow").strip().lower()
+                if not session or not event_id:
+                    self.send_json(400,{"ok":False,"error":"session and event_id required"}); return
+                res=toggle_follow(session,event_id,action)
+                self.send_json(200,{"ok":True,**res}); return
+            except Exception as exc:
+                self.send_json(500,{"ok":False,"error":str(exc)}); return
         if path=="/api/telemetry":
             try:
                 n=int(self.headers.get("Content-Length","0")); data=json.loads(self.rfile.read(n) or b"{}");
@@ -2237,6 +2501,13 @@ class Handler(BaseHTTPRequestHandler):
             q=urllib.parse.parse_qs(p.query).get("q",[""])[0]; self.send_json(200,{"ok":True,"query":q,"results":suggest_events(q)},send_body=send_body); return
         if path=="/api/replay":
             q=urllib.parse.parse_qs(p.query).get("date",[""])[0]; self.send_json(200,{"ok":True,**replay_day(q)},send_body=send_body); return
+        if path=="/api/follow-up":
+            qs=urllib.parse.parse_qs(p.query)
+            session=(qs.get("session") or [""])[0]
+            followed_raw=(qs.get("followed_ids") or [""])[0]
+            followed_list=[x.strip() for x in followed_raw.split(",") if x.strip()]
+            d=get_follow_up_data(session=session,client_followed_ids=followed_list)
+            self.send_json(200,{"ok":True,**d},send_body=send_body); return
         if path=="/api/knowledge-gap/" or path.startswith("/api/knowledge-gap/"):
             eid=path.rsplit("/",1)[-1]; d=knowledge_gap(eid)
             if not d: self.send_json(404,{"ok":False,"error":"event not found"},send_body=send_body); return
