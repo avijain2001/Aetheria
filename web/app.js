@@ -366,6 +366,7 @@ function render(){
   renderDesks();
   showReturn();
 }
+async function getJSON(url,signal=null,ms=7000){const c=new AbortController();const t=setTimeout(()=>c.abort(),ms);if(signal)signal.addEventListener('abort',()=>c.abort(),{once:true});try{const r=await fetch(url,{signal:c.signal,cache:'no-store'});if(!r.ok)throw new Error(`${r.status}`);return await r.json()}finally{clearTimeout(t)}}
 async function loadMarket(){
   try{
     const m=await getJSON("/api/market",null,6500);
