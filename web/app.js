@@ -27,7 +27,7 @@ function restoreUi(){try{const x=JSON.parse(sessionStorage.getItem('aetheria-ui'
 function cacheBootstrap(d){try{sessionStorage.setItem('aetheria-bootstrap',JSON.stringify({version:d.version,revision:d.revision,latest:(d.latest||[]).slice(0,350),events:(d.events||[]).slice(0,1200),flash:(d.flash||[]).slice(0,12),impact:(d.impact||[]).slice(0,25),moving:(d.moving||[]).slice(0,18),sections:d.sections||[],categories:d.categories||[],future:d.future||[],market:d.market||{},home:d.home||{},state:d.state||{},cached_at:Date.now()}))}catch{}}
 function hydrateCached(){try{const d=JSON.parse(sessionStorage.getItem('aetheria-bootstrap')||'null');if(!d||!Array.isArray(d.latest)||!d.latest.length)return false;Object.assign(state,{revision:num(d.revision),events:d.events||[],flash:d.flash||[],impact:d.impact||[],latest:d.latest||[],moving:d.moving||[],sections:d.sections||[],future:d.future||[],market:d.market||{},home:d.home||{},categories:d.categories||[],serverState:d.state||{},initialized:true});$('liveLabel').textContent='UPDATING';$('liveDot').className='live-check';render();return true}catch{return false}}
 function renderCategories(){
-  const preferred=['India','World','Markets','Business','Technology','Geopolitics','Sports','Entertainment','Local'];
+  const preferred=['India','World','Markets','Business','Technology','Legal','Geopolitics','Sports','Entertainment','Local'];
   const map=new Map((state.categories||[]).map(c=>[c.id,c]));
   const all=[{id:'Top',label:'Top',count:0},...preferred.map(id=>map.get(id)).filter(Boolean),(state.categories||[]).filter(c=>!preferred.includes(c.id)&&!['Top'].includes(c.id)).slice(0,6)];
   const container=$('topics');
@@ -70,23 +70,124 @@ function renderCategories(){
       }
     };
   });
+  renderCategoriesDrawer();
+}
+function renderCategoriesDrawer(){
+  const grid=$('categoriesGrid');if(!grid)return;
+  const cats=state.categories||[];
+  const filter=String($('categoriesFilter')?.value||'').trim().toLowerCase();
+  const filtered=filter?cats.filter(c=>(c.label||'').toLowerCase().includes(filter)||(c.id||'').toLowerCase().includes(filter)):cats;
+  grid.innerHTML=filtered.map(c=>`
+    <button class="cat-drawer-item ${state.topic===c.id&&!state.searchMode?'active':''}" data-cat="${esc(c.id)}">
+      <span>${esc(c.label)}</span>
+      <span class="cat-drawer-count">${num(c.count).toLocaleString()}</span>
+    </button>
+  `).join('');
+  grid.querySelectorAll('.cat-drawer-item').forEach(b=>{
+    b.onclick=()=>{
+      state.topic=b.dataset.cat;
+      state.searchMode=false;
+      state.query='';
+      $('search').value='';
+      $('clearSearch').classList.remove('show');
+      toggleCategories(false);
+      state.depth=14;
+      state.stackIndex=0;
+      persistUi();
+      render();
+      window.scrollTo({top:0,behavior:'smooth'});
+    };
+  });
+}
+function toggleCategories(open){
+  const d=$('categoriesDrawer');if(!d)return;
+  d.classList.toggle('open',open);
+  d.setAttribute('aria-hidden',open?'false':'true');
+  if(open){
+    renderCategoriesDrawer();
+    setTimeout(()=>{$('categoriesFilter')?.focus()},100);
+  }
 }
 function isFresh(e){const t=num(e?.last_seen||e?.published);if(!t)return true;return(Date.now()/1000-t)<=1209600}
 function topicFilter(e){if(!isFresh(e))return false;return state.topic==='Top'||state.topic==='All'||e.topic===state.topic}
 function trustChip(e){const s=String(e?.status||'DEVELOPING').toUpperCase();return`<span class="truth truth-${s.toLowerCase()}">${esc(s)}</span>`}
 function stackItems(){let items=(state.home?.stack||[]).filter(topicFilter);if(!items.length)items=(state.latest||[]).filter(topicFilter).slice(0,10);return items.slice(0,10)}
-function stackCard(e,pos,originalIndex){const sig=pct(e?.intelligence?.impact),conf=pct(e?.intelligence?.confidence);const active=pos===0;const layer=Math.min(pos,9);return`<article class="stack-card ${active?'active':''}" data-stack="${originalIndex}" style="--pos:${layer};--z:${100-layer};--opacity:${active?1:Math.max(.24,1-layer*.08)}"><div class="stack-copy"><div class="stack-kicker"><span class="status-dot"></span>${trustChip(e)}<em>${esc(e.topic||'WORLD')}</em><time>${age(e.last_seen||e.published)}</time></div><h2>${articleAnchor(e)}</h2>${e.description?`<p class="lead-summary">${esc(e.description)}</p>`:''}<div class="stack-evidence"><span>${num(e.sources)||1} linked report${num(e.sources)===1?'':'s'}</span><span>${num(e.source_tiers?.official)||0} official</span><span>${conf}% confidence</span><span>${sig}% impact</span>${(e.languages||[]).length?`<span>${(e.languages||[]).slice(0,2).map(esc).join(' · ')}</span>`:''}</div><div class="stack-ai"><b>${e.india_lens_reasons?.length?'INDIA LENS':'AETHERIA READ'}</b><span>${esc((e.life_impact||e.why_matters||e.india_lens_reasons||[]).slice(0,2).join(' · ')||'Observed story activity across the source set.')}</span></div><div class="lead-actions">${validUrl(e?.url)?`<a class="read-btn" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">Read original ↗</a>`:`<span class="read-btn disabled">Original unavailable</span>`}<span class="source-chip">${esc(sourceLine(e))}</span></div></div>${imageBlock(e,'stack-media',active?'eager':'lazy')} </article>`}
+function stackCard(e,pos,originalIndex){
+  const sig=pct(e?.intelligence?.impact),conf=pct(e?.intelligence?.confidence);
+  const active=pos===0;
+  const layer=Math.min(pos,9);
+  const isDisputed = e?.status === 'DISPUTED' || (e?.conflicts||[]).length > 0;
+  return`<article class="stack-card ${active?'active':''}" data-stack="${originalIndex}" style="--pos:${layer};--z:${100-layer};--opacity:${active?1:Math.max(.24,1-layer*.08)}"><div class="stack-copy"><div class="stack-kicker"><span class="status-dot"></span>${trustChip(e)}<em>${esc(e.topic||'WORLD')}</em><time>${age(e.last_seen||e.published)}</time></div><h2>${articleAnchor(e)}</h2>${e.description?`<p class="lead-summary">${esc(e.description)}</p>`:''}<div class="stack-evidence"><span>${num(e.sources)||1} linked report${num(e.sources)===1?'':'s'}</span><span>${num(e.source_tiers?.official)||0} official</span><span>${conf}% confidence</span><span>${sig}% impact</span>${(e.languages||[]).length?`<span>${(e.languages||[]).slice(0,2).map(esc).join(' · ')}</span>`:''}</div><div class="stack-ai"><b>${isDisputed?'⚡ CONTEXT & DISPUTE':(e.india_lens_reasons?.length?'INDIA LENS':'AETHERIA READ')}</b><span>${esc(isDisputed?'Source disagreements or contradictory claims noted across reporting set.':(e.life_impact||e.why_matters||e.india_lens_reasons||[]).slice(0,2).join(' · ')||'Observed story activity across the source set.')}</span></div><div class="lead-actions">${validUrl(e?.url)?`<a class="read-btn" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">Read original ↗</a>`:`<span class="read-btn disabled">Original unavailable</span>`}<span class="source-chip">${esc(sourceLine(e))}</span></div></div>${imageBlock(e,'stack-media',active?'eager':'lazy')} </article>`;
+}
 function formatMarket(v,symbol){const n=num(v);if(!n)return'—';if(['USD/INR','EUR/INR','GBP/INR','AED/INR'].includes(String(symbol||'')))return n.toFixed(2);if(String(symbol||'').startsWith('JPY/INR'))return n.toFixed(4);return n.toLocaleString(undefined,{maximumFractionDigits:2})}
 function renderMarket(){
   const el=$("marketGroups");if(!el)return;
   const groups=state.market?.groups||[];
   if(!groups.length){el.innerHTML='<div class="empty-state">Market data is currently syncing.</div>';return}
-  if(!state.marketTab||!groups.some(g=>g.id===state.marketTab))state.marketTab=groups[0]?.id||'india';
+  const isTop=state.topic==='Top'||state.topic==='All';
+
   const obsLabel=$("marketObservedLabel");
   if(obsLabel&&state.market?.at){
     const a=age(state.market.at);
-    obsLabel.textContent=a==='now'||a==='—'?'Updated just now':`Updated ${a} ago`;
+    obsLabel.textContent=a==='now'||a==='—'?'LIVE':`LIVE · ${a}`;
   }
+
+  // Wire full desk button on Home
+  const fullBtn=$('marketFullLink');
+  if(fullBtn){
+    fullBtn.style.display=isTop?'inline-flex':'none';
+    fullBtn.onclick=()=>{
+      state.topic='Markets';
+      state.searchMode=false;
+      state.depth=14;
+      state.stackIndex=0;
+      persistUi();
+      render();
+      window.scrollTo({top:0,behavior:'smooth'});
+    };
+  }
+
+  if(isTop){
+    // Compact Market Overview Tape on Home Page
+    const allItems=[];
+    groups.forEach(g=>(g.items||[]).forEach(it=>allItems.push(it)));
+    const prioritySymbols=['NIFTY 50','SENSEX','USD/INR','BRENT CRUDE','GOLD','S&P 500','NASDAQ 100'];
+    const chosen=[];
+    prioritySymbols.forEach(sym=>{
+      const match=allItems.find(it=>String(it.symbol||it.label||'').toUpperCase()===sym.toUpperCase()||String(it.label||'').toUpperCase().includes(sym.toUpperCase()));
+      if(match&&!chosen.some(x=>x.symbol===match.symbol))chosen.push(match);
+    });
+    if(chosen.length<6){
+      allItems.forEach(it=>{if(chosen.length<8&&!chosen.some(x=>x.symbol===it.symbol))chosen.push(it);});
+    }
+
+    const tapeHtml=chosen.map(x=>{
+      const name=esc(x.label||x.symbol||'Quote');
+      if(x.available===false||x.price==null){
+        return `<div class="market-tape-item"><span class="tape-name">${name}</span><span class="tape-price">—</span><span class="tape-badge flat">Closed</span></div>`;
+      }
+      const changeNum = x.change_num != null ? Number(x.change_num) : (x.change != null && x.price != null && x.previous_close ? Number(x.price) - Number(x.previous_close) : (x.change != null && x.price != null ? Number(x.price) * Number(x.change) : null));
+      const changePct = x.change != null ? Number(x.change) * 100 : null;
+      let changeText = '—';
+      let changeClass = 'flat';
+      if (changePct != null || changeNum != null) {
+        const isUp = (changeNum != null ? changeNum >= 0 : changePct >= 0);
+        changeClass = isUp ? 'up' : 'down';
+        const numStr = changeNum != null ? `${isUp ? '+' : ''}${changeNum.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '';
+        const pctStr = changePct != null ? `${isUp ? '+' : ''}${changePct.toFixed(2)}%` : '';
+        if (numStr && pctStr) changeText = `${isUp ? '▲' : '▼'} ${numStr} (${pctStr})`;
+        else if (pctStr) changeText = `${isUp ? '▲' : '▼'} ${pctStr}`;
+        else if (numStr) changeText = `${isUp ? '▲' : '▼'} ${numStr}`;
+      }
+      return `<div class="market-tape-item"><span class="tape-name">${name}</span><span class="tape-price">${formatMarket(x.price,x.symbol)}</span><span class="tape-badge ${changeClass}">${changeText}</span></div>`;
+    }).join('');
+
+    el.innerHTML=tapeHtml;
+    return;
+  }
+
+  // Dedicated Market Page: Full-Featured Market Desk
+  if(!state.marketTab||!groups.some(g=>g.id===state.marketTab))state.marketTab=groups[0]?.id||'india';
   const tabs=groups.map(g=>`<button class="market-tab-btn ${state.marketTab===g.id?'active':''}" data-tab="${esc(g.id)}">${esc(g.label)}</button>`).join('');
   const activeGroup=groups.find(g=>g.id===state.marketTab)||groups[0];
   const items=(activeGroup?.items||[]).map(x=>{
@@ -105,27 +206,30 @@ function renderMarket(){
       changeClass = isUp ? 'up' : 'down';
       const numStr = changeNum != null ? `${isUp ? '+' : ''}${changeNum.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '';
       const pctStr = changePct != null ? `${isUp ? '+' : ''}${changePct.toFixed(2)}%` : '';
-      if (numStr && pctStr) {
-        changeText = `${isUp ? '▲' : '▼'} ${numStr} (${pctStr})`;
-      } else if (pctStr) {
-        changeText = `${isUp ? '▲' : '▼'} ${pctStr}`;
-      } else if (numStr) {
-        changeText = `${isUp ? '▲' : '▼'} ${numStr}`;
-      }
+      if (numStr && pctStr) changeText = `${isUp ? '▲' : '▼'} ${numStr} (${pctStr})`;
+      else if (pctStr) changeText = `${isUp ? '▲' : '▼'} ${pctStr}`;
+      else if (numStr) changeText = `${isUp ? '▲' : '▼'} ${numStr}`;
     }
     return`<div class="market-card"><div class="m-card-header"><span class="m-card-name">${name}</span><span class="m-card-curr">${curr}</span></div><div class="m-card-body"><strong class="m-card-price">${formatMarket(x.price,x.symbol)}</strong><span class="m-card-badge ${changeClass}">${changeText}</span></div></div>`;
   }).join('');
-  el.innerHTML=`<div class="market-bar"><div class="market-tabs">${tabs}</div><div class="market-source-note">${esc(activeGroup?.source||'')}</div></div><div class="market-active-grid">${items}</div>`;
+  el.innerHTML=`<div class="market-full-desk"><div class="market-bar"><div class="market-tabs">${tabs}</div><div class="market-source-note">${esc(activeGroup?.source||'')}</div></div><div class="market-active-grid">${items}</div></div>`;
   el.querySelectorAll('.market-tab-btn').forEach(b=>b.onclick=()=>{
     state.marketTab=b.dataset.tab;
     renderMarket();
   });
 }
-function renderStoryAnalysis(){const e=stackItems()[state.stackIndex],box=$("stackAnalysis");if(!box)return;if(!e){box.innerHTML='';return}const why=(e.why_matters||e.india_lens_reasons||[]).slice(0,2);const rel=(e.decision_relevance||e.personal_relevance||[]).slice(0,3);const watch=[];if(num(e.signals?.financial)>=.45)watch.push('Money / markets');if(num(e.signals?.supply_chain)>=.45)watch.push('Prices / supply');if(num(e.signals?.geopolitical)>=.45)watch.push('Policy / security');if(num(e.signals?.social)>=.45)watch.push('Public / safety');box.innerHTML=`<div class="analysis-kicker"><span>AETHERIA READ</span><em>${esc(e.status||'DEVELOPING')}</em><i>${num(e.sources)||1} reports</i></div><div class="analysis-columns"><div><b>WHY IT MATTERS</b><p>${esc(why.join(' · ')||'Observed event activity across the current source set.')}</p></div><div><b>INDIA / LIFE</b><p>${esc(rel.join(' · ')||'No strong life-impact pathway is detected yet.')}</p></div><div><b>WATCH NEXT</b><p>${esc(watch.join(' → ')||'New corroboration, changes or related events.')}</p></div></div>`}
 
 function renderFlash(){const a=[...(state.home?.flash||state.flash||[])].filter(isFresh).sort((x,y)=>num(y.flash_score)-num(x.flash_score)||num(y.last_seen)-num(x.last_seen)).slice(0,4);const rail=$('flashRail');if(!rail)return;rail.hidden=!a.length;rail.style.display=a.length?'grid':'none';if(!a.length)return;$('flashCount').textContent=a.length||'';$('flashList').innerHTML=a.map(e=>`<article class="flash-item" data-event="${esc(e.id)}"><span class="flash-time">${age(e.last_seen||e.published)}</span><strong>${articleAnchor(e)}</strong><span class="flash-topic">${esc(e.topic||'WORLD')}</span>${originalLink(e)}</article>`).join('');wireStoryRows('flashList')}
-function renderStack(){const items=stackItems();$('stackCount').textContent=items.length?`${items.length} stories`:'';if(state.stackIndex>=items.length)state.stackIndex=0;const order=items.length?[...items.slice(state.stackIndex),...items.slice(0,state.stackIndex)]:[];$('storyStack').innerHTML=order.map((e,pos)=>stackCard(e,pos,(state.stackIndex+pos)%Math.max(1,items.length))).join('')||'<div class="empty-state">No verified story stack is available.</div>';updateStackControls(items);preloadImages(order.slice(1,3));if(state.stackTimer)clearInterval(state.stackTimer);if(items.length>1)state.stackTimer=setInterval(()=>moveStack(1),9000);const active=items[state.stackIndex];renderStackInsight(active);renderStoryAnalysis()}
-function updateStackControls(items){$('stackPosition').textContent=items.length?`${state.stackIndex+1} / ${items.length}`:'0 / 0';$('stackDots').innerHTML=items.map((_,i)=>`<button aria-label="Story ${i+1}" class="${i===state.stackIndex?'active':''}" data-stack-dot="${i}"></button>`).join('');$('stackDots').querySelectorAll('button').forEach(b=>b.onclick=()=>{state.stackIndex=num(b.dataset.stackDot);persistUi();renderStack()});$('stackPrev').disabled=items.length<2;$('stackNext').disabled=items.length<2}
+function renderStack(){const items=stackItems();$('stackCount').textContent=items.length?`${items.length} stories`:'';if(state.stackIndex>=items.length)state.stackIndex=0;const order=items.length?[...items.slice(state.stackIndex),...items.slice(0,state.stackIndex)]:[];$('storyStack').innerHTML=order.map((e,pos)=>stackCard(e,pos,(state.stackIndex+pos)%Math.max(1,items.length))).join('')||'<div class="empty-state">No verified story stack is available.</div>';updateStackControls(items);preloadImages(order.slice(1,3));if(state.stackTimer)clearInterval(state.stackTimer);if(items.length>1)state.stackTimer=setInterval(()=>moveStack(1),9000);const active=items[state.stackIndex];renderStackInsight(active)}
+function updateStackControls(items){
+  const cur=items.length?state.stackIndex+1:0;
+  const tot=items.length;
+  $('stackPosition').textContent=tot?`${String(cur).padStart(2,'0')} / ${String(tot).padStart(2,'0')}`:'00 / 00';
+  $('stackDots').innerHTML=items.map((_,i)=>`<button aria-label="Story ${i+1}" class="${i===state.stackIndex?'active':''}" data-stack-dot="${i}"></button>`).join('');
+  $('stackDots').querySelectorAll('button').forEach(b=>b.onclick=()=>{state.stackIndex=num(b.dataset.stackDot);persistUi();renderStack()});
+  $('stackPrev').disabled=items.length<2;
+  $('stackNext').disabled=items.length<2;
+}
 function moveStack(dir){const items=stackItems();if(items.length<2)return;state.stackIndex=(state.stackIndex+dir+items.length)%items.length;persistUi();renderStack();telemetry(items[state.stackIndex].id,'stack')}
 function renderStackInsight(e){if(!e){$('stackInsight').innerHTML='';return}const reasons=(e.why_matters||e.india_lens_reasons||[]).slice(0,3);$('stackInsight').innerHTML=`<span>${e.status==='CONFIRMED'?'CONFIRMED EVIDENCE':e.status==='DISPUTED'?'CONFLICTING REPORTS':'DEVELOPING SIGNAL'}</span><b>${esc(reasons.join(' · ')||'Observed across the current source set')}</b>`}
 function analysisHint(e){const s=e.signals||{},parts=[];if(num(s.india)>=.45)parts.push('India exposure');if(num(s.financial)>=.45)parts.push('Money / markets');if(num(s.supply_chain)>=.45)parts.push('Trade / supply');if(num(s.geopolitical)>=.45)parts.push('Policy / security');if(num(s.social)>=.45)parts.push('Public / safety');if(e.local_relevance)parts.push('Local relevance');return (parts.length?parts:(e.personal_relevance||e.why_matters||[])).slice(0,2).join(' · ')||'Aetheria Read available'}
@@ -133,7 +237,7 @@ function renderHappening(items){
   const isTop=state.topic==='Top'||state.topic==='All';
   const label=$('happeningPanelTitle');
   if(label){
-    const deskNames={'India':'INDIA WIRE','Markets':'MARKET WIRE','World':'GLOBAL DISPATCH','Business':'BUSINESS WIRE','Technology':'TECH WIRE','Geopolitics':'STRATEGIC WIRE','Sports':'SPORTS WIRE','Entertainment':'CULTURE WIRE','Local':'LOCAL WIRE'};
+    const deskNames={'India':'INDIA WIRE','Markets':'MARKET WIRE','World':'GLOBAL DISPATCH','Business':'BUSINESS WIRE','Technology':'TECH WIRE','Geopolitics':'STRATEGIC WIRE','Sports':'SPORTS WIRE','Entertainment':'CULTURE WIRE','Local':'LOCAL WIRE','Legal':'LEGAL WIRE'};
     label.textContent=isTop?'INDIA NOW':(deskNames[state.topic]||`${state.topic.toUpperCase()} WIRE`);
   }
   let a;
@@ -184,7 +288,7 @@ function renderReadNext(){
 }
 function renderEmerging(){const a=(state.home?.emerging||[]).filter(topicFilter);$('emergingList').innerHTML=a.map(e=>`<article class="emerging-row" data-event="${esc(e.id)}"><span class="emerging-dot"></span><div><small>${trustChip(e)} · ${age(e.last_seen||e.published)}</small><h3>${articleAnchor(e)}</h3><p>${num(e.sources)||1} source${num(e.sources)===1?'':'s'} · ${(e.india_lens_reasons||[]).slice(0,2).map(esc).join(' · ')}</p></div>${originalLink(e)}</article>`).join('')||'<div class="empty-state">No emerging signal above the discovery threshold.</div>';wireStoryRows('emergingList')}
 function renderNext(){const n=state.home?.now,f=state.home?.next;$('nowContext').innerHTML=n?`<article data-event="${esc(n.id)}"><b>${articleAnchor(n)}</b><span>${esc(n.status||'DEVELOPING')} · ${age(n.last_seen||n.published)} · ${pct(n.intelligence?.confidence)}% confidence</span></article>`:'<div class="empty-state">No moving event surfaced.</div>';$('nextContext').innerHTML=f?`<article>${validUrl(f.url)?`<a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer">${esc(f.title)}</a>`:esc(f.title)}<span>${esc(f.horizon)} · ${futureTime(f.start_ts,f.time_known)} · ${esc(f.category||'World')}</span></article>`:'<div class="empty-state">No verified scheduled event available.</div>';wireStoryRows('nowContext')}
-function renderDesks(){const sections=(state.sections||[]).filter(s=>Array.isArray(s.events)&&s.events.length);const fallback=[['Finance & Markets',new Set(['Finance','Markets','Economy','Business','Commodities','Energy'])],['India & Current Affairs',new Set(['India','Politics','Local','Education','Health'])],['World & Geopolitics',new Set(['Geopolitics','World'])],['Technology & Science',new Set(['Technology','AI','Science','Space'])],['Sports',new Set(['Sports'])],['Entertainment & Culture',new Set(['Entertainment','Culture'])]];const data=sections.length?sections:fallback.map(([label,topics])=>({label,events:(state.latest||[]).filter(e=>topics.has(e.topic)).slice(0,4)}));$('deskGrid').innerHTML=data.map((s,i)=>{const rows=(s.events||[]).slice(0,4);const cls=s.label.includes('Entertainment')?' entertainment':'',accent=s.label.includes('Finance')?'finance':s.label.includes('India')?'india':s.label.includes('World')?'world':s.label.includes('Technology')?'technology':s.label.includes('Sports')?'sports':'culture';return`<article class="desk ${accent}${cls}"><div class="desk-head"><h2>${esc(s.label)}</h2><span>${rows.length}</span></div>${rows.map(e=>`<div class="desk-story" data-event="${esc(e.id)}"><time>${age(e.last_seen||e.published)}</time><h3>${articleAnchor(e)}</h3><p>${esc(e.topic||'World')} · ${esc(sourceLine(e))}</p><small class="mini-read"><b>Aetheria Read</b> ${esc(analysisHint(e))}</small></div>`).join('')||'<div class="empty-state">No verified stories in this desk.</div>'}</article>`}).join('');wireStoryRows('deskGrid')}
+function renderDesks(){const sections=(state.sections||[]).filter(s=>Array.isArray(s.events)&&s.events.length);const fallback=[['Finance & Markets',new Set(['Finance','Markets','Economy','Business','Commodities','Energy'])],['India & Current Affairs',new Set(['India','Politics','Local','Education','Health'])],['Legal & Judiciary',new Set(['Legal','Supreme Court','Judiciary','Law'])],['World & Geopolitics',new Set(['Geopolitics','World'])],['Technology & Science',new Set(['Technology','AI','Science','Space'])],['Sports',new Set(['Sports'])],['Entertainment & Culture',new Set(['Entertainment','Culture'])]];const data=sections.length?sections:fallback.map(([label,topics])=>({label,events:(state.latest||[]).filter(e=>topics.has(e.topic)).slice(0,4)}));$('deskGrid').innerHTML=data.map((s,i)=>{const rows=(s.events||[]).slice(0,4);const cls=s.label.includes('Entertainment')?' entertainment':'',accent=s.label.includes('Finance')?'finance':s.label.includes('India')?'india':s.label.includes('Legal')?'legal':s.label.includes('World')?'world':s.label.includes('Technology')?'technology':s.label.includes('Sports')?'sports':'culture';return`<article class="desk ${accent}${cls}"><div class="desk-head"><h2>${esc(s.label)}</h2><span>${rows.length}</span></div>${rows.map(e=>`<div class="desk-story" data-event="${esc(e.id)}"><time>${age(e.last_seen||e.published)}</time><h3>${articleAnchor(e)}</h3><p>${esc(e.topic||'World')} · ${esc(sourceLine(e))}</p><small class="mini-read"><b>Aetheria Read</b> ${esc(analysisHint(e))}</small></div>`).join('')||'<div class="empty-state">No verified stories in this desk.</div>'}</article>`}).join('');wireStoryRows('deskGrid')}
 function showReturn(){const prev=state.lastVisit;if(!prev||Date.now()/1000-prev<600)return;const changed=(state.latest||[]).filter(e=>num(e.last_seen||e.published)>prev).slice(0,4);if(!changed.length)return;$('returnTitle').textContent=`${changed.length} updates since your last visit`;$('returnList').innerHTML=changed.map(e=>`<button data-event="${esc(e.id)}"><time>${age(e.last_seen||e.published)}</time><span>${esc(e.title)}</span></button>`).join('');$('returnStrip').hidden=false;wireStoryRows('returnList')}
 function applyState(s){const live=num(s.healthy_sources)>0;$('liveLabel').textContent=s.fetching_sources?'UPDATING':live?'LIVE':'CHECKING';$('liveDot').className=s.fetching_sources?'live-check':live?'live-ok':'live-warn';if($('editionDate'))$('editionDate').textContent=new Date().toLocaleDateString([],{day:'2-digit',month:'short',year:'numeric'});if($('tickerBtn')&&s.engine_error)$('tickerBtn').title=`Engine: ${s.engine_error}`}
 function render(){
@@ -192,7 +296,7 @@ function render(){
   if(state.searchMode){$('homeView').hidden=true;$('searchView').hidden=false;renderSearch();return}
   $('homeView').hidden=false;$('searchView').hidden=true;
   const isTop=state.topic==='Top'||state.topic==='All';
-  const deskHeaders={'India':'India Intelligence · National Monitor','Markets':'Markets & Capital · Global Transmission','World':'World Desk · Geopolitics & Global Affairs','Business':'Business & Commerce · Industry Monitor','Technology':'Technology & Innovation · Systems & AI','Geopolitics':'Geopolitics & Defense · Strategic Analysis','Sports':'Sports Desk · Competitions & Records','Entertainment':'Entertainment & Culture Desk','Local':'Local & Regional Wire · Ground Signals'};
+  const deskHeaders={'India':'India Intelligence · National Monitor','Markets':'Markets & Capital · Global Transmission','World':'World Desk · Geopolitics & Global Affairs','Business':'Business & Commerce · Industry Monitor','Technology':'Technology & Innovation · Systems & AI','Geopolitics':'Geopolitics & Defense · Strategic Analysis','Sports':'Sports Desk · Competitions & Records','Entertainment':'Entertainment & Culture Desk','Local':'Local & Regional Wire · Ground Signals','Legal':'Legal Intelligence · Supreme Court & Judiciary Monitor'};
   $('viewTitle').textContent=isTop?'What matters right now':(deskHeaders[state.topic]||`${state.topic} Desk · Intelligence`);
   const secLabel=$('latestSectionLabel');if(secLabel)secLabel.textContent=isTop?'LATEST':`${state.topic.toUpperCase()} CHRONICLE`;
   const secSub=$('latestSubLabel');if(secSub)secSub.textContent=isTop?'CHRONOLOGICAL':'VERIFIED STREAM';
@@ -224,7 +328,34 @@ async function getJSON(url,signal=null,ms=7000){const c=new AbortController();co
 async function refresh(){if(state.refreshInFlight)return;state.refreshInFlight=true;try{const d=await getJSON('/api/bootstrap',null,7000);const changed=!state.initialized||num(d.revision)!==num(state.revision);const y=window.scrollY;Object.assign(state,{revision:num(d.revision),events:d.events||[],flash:d.flash||[],impact:d.impact||[],latest:d.latest||[],moving:d.moving||[],sections:d.sections||[],future:d.future||[],market:d.market||{},home:d.home||{},categories:d.categories||[]});applyState(d.state||{});cacheBootstrap(d);startTicker();if(changed&&!state.searchMode)render();if(!state.initialized)render();if(changed&&state.initialized)requestAnimationFrame(()=>window.scrollTo({top:y,behavior:'auto'}));state.initialized=true;checkRadars();}catch(e){if(!state.initialized){$('liveLabel').textContent='CHECKING';$('tickerBtn').textContent='Waiting for verified reports…'}}finally{state.refreshInFlight=false}}
 function startTicker(){if(state.tickerTimer)clearInterval(state.tickerTimer);state.tickerIndex=0;const tick=()=>{const a=(state.latest||[]).filter(topicFilter).slice(0,12);if(!a.length){$('tickerBtn').textContent='Waiting for verified reports…';$('tickerBtn').dataset.event='';return}const e=a[state.tickerIndex%a.length];state.tickerIndex++;$('tickerBtn').textContent=e.title;$('tickerBtn').dataset.event=e.id};tick();state.tickerTimer=setInterval(tick,8000)}
 function wireStoryRows(id){$(id)?.querySelectorAll('[data-event]').forEach(x=>{x.onclick=e=>{if(e.target.closest('a'))return;openStory(x.dataset.event)}})}
-function renderSearch(){const rows=(state.events||[]).slice(0,60);$('searchTitle').textContent=state.query?`Search · “${state.query}”`:'Results';$('searchResults').innerHTML=rows.map(row).join('')||'<div class="empty-state">No matching verified events.</div>';wireStoryRows('searchResults')}
+function renderSearch(){
+  const rows=(state.events||[]).slice(0,60);
+  $('searchTitle').textContent=state.query?`Search · “${state.query}”`:'Results';
+  if(!rows.length){
+    $('searchResults').innerHTML='<div class="empty-state">No matching verified events.</div>';
+    return;
+  }
+  $('searchResults').innerHTML=rows.map(e=>{
+    const destUrl=validUrl(e.url)?e.url:validUrl(e.primary_url)?e.primary_url:'#';
+    return `<article class="search-item" data-event="${esc(e.id)}">
+      <a class="search-main-link" href="${esc(destUrl)}" ${destUrl!=='#'?'target="_blank" rel="noopener noreferrer"':''}>
+        <div class="news-top"><span class="tag">${esc(e.topic||'WORLD')}</span>${trustChip(e)}<span class="age">${age(e.last_seen||e.published)}</span></div>
+        <h3 class="news-title">${esc(e.title)}</h3>
+        <div class="news-meta"><span>${esc(sourceLine(e))}</span>${num(e.sources)>1?`<span>· ${num(e.sources)} sources</span>`:''}</div>
+        ${e.summary?`<p class="row-analysis">${esc(e.summary)}</p>`:''}
+      </a>
+      <button class="search-read-btn" data-open-read="${esc(e.id)}" title="Open in-depth Aetheris Read analysis">
+        <span>Aetheris Read</span> ↗
+      </button>
+    </article>`;
+  }).join('');
+  $('searchResults').querySelectorAll('[data-open-read]').forEach(b=>{
+    b.onclick=e=>{
+      e.stopPropagation();
+      openStory(b.dataset.openRead);
+    };
+  });
+}
 function hideSuggestions(){$('searchSuggestions').hidden=true;$('searchSuggestions').innerHTML=''}
 function renderSuggestions(items){if(!items?.length){hideSuggestions();return}$('searchSuggestions').hidden=false;$('searchSuggestions').innerHTML=items.slice(0,7).map(e=>`<button class="suggest-item" data-suggest-id="${esc(e.id||'')}"><span>${esc(e.topic||'WORLD')}</span><b>${esc(e.title||'')}</b><time>${age(e.last_seen)}</time></button>`).join('');$('searchSuggestions').querySelectorAll('button').forEach(b=>b.onclick=()=>{const id=b.dataset.suggestId;hideSuggestions();if(id)openStory(id)})}
 function runSuggest(q){const raw=String(q??'');const term=raw.trim();const seq=++state.suggestSeq;if(term.length<1){hideSuggestions();return}if(state.suggestAbort)state.suggestAbort.abort();state.suggestAbort=new AbortController();clearTimeout(state.suggestTimer);state.suggestTimer=setTimeout(async()=>{try{const d=await getJSON(`/api/suggest?q=${encodeURIComponent(term)}`,state.suggestAbort.signal,4000);if(seq!==state.suggestSeq||$('search').value!==raw)return;renderSuggestions(d.results||[])}catch(e){if(e.name!=='AbortError'&&seq===state.suggestSeq)hideSuggestions()}},140)}
@@ -441,7 +572,10 @@ function toggleFollowUp(open){
   }
 }
 
-$('refresh').onclick=()=>{toast('Refreshing the world model…');refresh()};$('systemBtn').onclick=()=>toggleDrawer(true);$('drawerClose').onclick=()=>toggleDrawer(false);$('drawerBackdrop').onclick=()=>toggleDrawer(false);$('modalClose').onclick=closeStory;$('modalBackdrop').onclick=closeStory;$('knowledgeBtn').onclick=openKnowledgeGap;$('tickerBtn').onclick=()=>{const id=$('tickerBtn').dataset.event;if(id)openStory(id)};$('loadMore').onclick=()=>{state.depth=Math.min(120,state.depth+10);persistUi();renderFeed()};$('clearSearch').onclick=clearSearch;$('search').addEventListener('compositionstart',()=>state.composing=true);$('search').addEventListener('compositionend',e=>{state.composing=false;runSuggest(e.target.value);runSearch(e.target.value)});$('search').addEventListener('input',e=>{if(state.composing)return;const raw=String(e.currentTarget.value??'');runSuggest(raw);clearTimeout(state.searchTimer);state.searchTimer=setTimeout(()=>{if($('search').value===raw)runSearch(raw)},220)});$('search').addEventListener('focus',()=>{if($('search').value.trim())runSuggest($('search').value)});$('search').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();hideSuggestions();runSearch(e.target.value)}if(e.key==='Escape')hideSuggestions()});document.addEventListener('click',e=>{if(!$('searchShell').contains(e.target))hideSuggestions()});document.addEventListener('keydown',e=>{if(e.key==='/'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){e.preventDefault();$('search').focus()}if(e.key==='Escape'){if($('storyModal').classList.contains('open'))closeStory();else if($('followUpModal')?.classList.contains('open'))toggleFollowUp(false);else if($('replayModal').classList.contains('open'))toggleReplay(false);else if($('radarDrawer').classList.contains('open'))toggleRadar(false);else if($('inboxDrawer').classList.contains('open'))toggleInbox(false);else if($('systemDrawer').classList.contains('open'))toggleDrawer(false)}});$('theme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light';localStorage.setItem('aetheria-theme',document.documentElement.dataset.theme)};document.querySelectorAll('#depthSwitch button').forEach(b=>b.onclick=()=>{state.depth=num(b.dataset.depth);document.querySelectorAll('#depthSwitch button').forEach(x=>x.classList.toggle('active',x===b));persistUi();renderFeed()});$('stackPrev').onclick=()=>moveStack(-1);$('stackNext').onclick=()=>moveStack(1);$('storyStack').addEventListener('pointerdown',e=>{const x=e.clientX;const up=ev=>{const dx=ev.clientX-x;if(Math.abs(dx)>35)moveStack(dx<0?1:-1);document.removeEventListener('pointerup',up)};document.addEventListener('pointerup',up)});$('radarBtn').onclick=()=>toggleRadar(true);$('radarBackdrop').onclick=()=>toggleRadar(false);$('radarClose').onclick=()=>toggleRadar(false);$('radarAddBtn').onclick=addRadar;$('radarInput').addEventListener('keydown',e=>{if(e.key==='Enter')addRadar()});$('inboxBtn').onclick=()=>toggleInbox(true);$('inboxBackdrop').onclick=()=>toggleInbox(false);$('inboxClose').onclick=()=>toggleInbox(false);$('clearInbox').onclick=clearInbox;$('replayBtn').onclick=()=>{toggleReplay(true);if(!$('replayDate').value)$('replayDate').value=todayIndia();runReplay()};$('replayBackdrop').onclick=()=>toggleReplay(false);$('replayClose').onclick=()=>toggleReplay(false);$('replayRun').onclick=runReplay;
+$('refresh').onclick=()=>{toast('Refreshing the world model…');refresh()};$('systemBtn').onclick=()=>toggleDrawer(true);$('drawerClose').onclick=()=>toggleDrawer(false);$('drawerBackdrop').onclick=()=>toggleDrawer(false);$('modalClose').onclick=closeStory;$('modalBackdrop').onclick=closeStory;$('knowledgeBtn').onclick=openKnowledgeGap;$('tickerBtn').onclick=()=>{const id=$('tickerBtn').dataset.event;if(id)openStory(id)};$('loadMore').onclick=()=>{state.depth=Math.min(120,state.depth+10);persistUi();renderFeed()};$('clearSearch').onclick=clearSearch;$('search').addEventListener('compositionstart',()=>state.composing=true);$('search').addEventListener('compositionend',e=>{state.composing=false;runSuggest(e.target.value);runSearch(e.target.value)});$('search').addEventListener('input',e=>{if(state.composing)return;const raw=String(e.currentTarget.value??'');runSuggest(raw);clearTimeout(state.searchTimer);state.searchTimer=setTimeout(()=>{if($('search').value===raw)runSearch(raw)},220)});$('search').addEventListener('focus',()=>{if($('search').value.trim())runSuggest($('search').value)});$('search').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();hideSuggestions();runSearch(e.target.value)}if(e.key==='Escape')hideSuggestions()});document.addEventListener('click',e=>{if(!$('searchShell').contains(e.target))hideSuggestions()});document.addEventListener('keydown',e=>{if(e.key==='/'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){e.preventDefault();$('search').focus()}if(e.key==='Escape'){if($('storyModal').classList.contains('open'))closeStory();else if($('categoriesDrawer')?.classList.contains('open'))toggleCategories(false);else if($('followUpModal')?.classList.contains('open'))toggleFollowUp(false);else if($('replayModal').classList.contains('open'))toggleReplay(false);else if($('radarDrawer').classList.contains('open'))toggleRadar(false);else if($('inboxDrawer').classList.contains('open'))toggleInbox(false);else if($('systemDrawer').classList.contains('open'))toggleDrawer(false)}});$('theme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light';localStorage.setItem('aetheria-theme',document.documentElement.dataset.theme)};document.querySelectorAll('#depthSwitch button').forEach(b=>b.onclick=()=>{state.depth=num(b.dataset.depth);document.querySelectorAll('#depthSwitch button').forEach(x=>x.classList.toggle('active',x===b));persistUi();renderFeed()});$('stackPrev').onclick=()=>moveStack(-1);$('stackNext').onclick=()=>moveStack(1);$('storyStack').addEventListener('pointerdown',e=>{const x=e.clientX;const up=ev=>{const dx=ev.clientX-x;if(Math.abs(dx)>35)moveStack(dx<0?1:-1);document.removeEventListener('pointerup',up)};document.addEventListener('pointerup',up)});$('radarBtn').onclick=()=>toggleRadar(true);$('radarBackdrop').onclick=()=>toggleRadar(false);$('radarClose').onclick=()=>toggleRadar(false);$('radarAddBtn').onclick=addRadar;$('radarInput').addEventListener('keydown',e=>{if(e.key==='Enter')addRadar()});$('inboxBtn').onclick=()=>toggleInbox(true);$('inboxBackdrop').onclick=()=>toggleInbox(false);$('inboxClose').onclick=()=>toggleInbox(false);$('clearInbox').onclick=clearInbox;$('replayBtn').onclick=()=>{toggleReplay(true);if(!$('replayDate').value)$('replayDate').value=todayIndia();runReplay()};$('replayBackdrop').onclick=()=>toggleReplay(false);$('replayClose').onclick=()=>toggleReplay(false);$('replayRun').onclick=runReplay;
+$('categoriesClose')?.addEventListener('click',()=>toggleCategories(false));
+$('categoriesBackdrop')?.addEventListener('click',()=>toggleCategories(false));
+$('categoriesFilter')?.addEventListener('input',e=>renderCategoriesDrawer(e.target.value));
 $('followUpClose')?.addEventListener('click',()=>toggleFollowUp(false));$('followUpBackdrop')?.addEventListener('click',()=>toggleFollowUp(false));
 $('followUpTabs')?.querySelectorAll('.followup-tab-btn').forEach(btn=>{
   btn.onclick=()=>{
@@ -450,11 +584,12 @@ $('followUpTabs')?.querySelectorAll('.followup-tab-btn').forEach(btn=>{
     renderFollowUpView();
   };
 });
-/* HisabKitab / Aetheria Command Dock wiring (5 destinations: home, radar, followup, replay, more) */
+/* HisabKitab / Aetheria Command Dock wiring (5 destinations: home, categories, followup, replay, more) */
 document.querySelectorAll('.bnav-item').forEach(b=>b.onclick=()=>{
   const nav=b.dataset.nav;
   document.querySelectorAll('.bnav-item').forEach(x=>x.classList.toggle('active',x===b));
   if(nav==='home'){if(state.searchMode)clearSearch();state.topic='Top';state.stackIndex=0;persistUi();render();window.scrollTo({top:0,behavior:'smooth'})}
+  if(nav==='categories')toggleCategories(true);
   if(nav==='radar')toggleRadar(true);
   if(nav==='followup')toggleFollowUp(true);
   if(nav==='replay'){toggleReplay(true);if(!$('replayDate').value)$('replayDate').value=todayIndia();runReplay()}

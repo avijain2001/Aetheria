@@ -13,20 +13,22 @@
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-<header class="topbar">
-  <a class="brand" href="/" id="brandHome" aria-label="Aetheria home"><span class="mark"><i></i></span><span class="brand-copy"><strong>AETHERIA</strong><small><b>Know what matters.</b><span> before you go looking.</span></small></span></a>
-  <div class="search-shell" id="searchShell"><span class="search-icon">⌕</span><input id="search" placeholder="Search the world…" autocomplete="off" aria-label="Search news" inputmode="search"><kbd>/</kbd><button id="clearSearch" class="search-clear" aria-label="Clear search">×</button><div id="searchSuggestions" class="search-suggestions" hidden></div></div>
-  <div class="actions"><button class="status-btn" id="systemBtn" aria-label="Open source status"><i id="liveDot"></i><span id="liveLabel">STARTING</span></button><button class="icon-btn" id="refresh" aria-label="Refresh">↻</button><button class="icon-btn" id="theme" aria-label="Change theme">◐</button></div>
-</header>
-<section id="flashRail" class="flash-rail" hidden aria-live="polite"><div class="flash-label"><i></i><span>FLASH</span><small id="flashCount">0</small></div><div id="flashList" class="flash-list"></div></section>
-<div class="ticker"><span class="ticker-label"><i></i>INDIA NOW</span><span id="editionDate" class="ticker-date">—</span><button id="tickerBtn" class="ticker-story">Waiting for verified reports…</button><time id="clock">—</time></div>
-
-<!-- V24: Top-level category navigation -->
-<nav class="category-bar" id="categoryBar">
-  <div class="category-bar-inner">
-    <div id="topics" class="topics" aria-label="News categories"></div>
+<header class="app-header" id="appHeader">
+  <div class="topbar">
+    <a class="brand" href="/" id="brandHome" aria-label="Aetheria home"><span class="mark"><i></i></span><span class="brand-copy"><strong>AETHERIA</strong><small><b>Know what matters.</b><span> before you go looking.</span></small></span></a>
+    <div class="search-shell" id="searchShell"><span class="search-icon">⌕</span><input id="search" placeholder="Search the world…" autocomplete="off" aria-label="Search news" inputmode="search"><kbd>/</kbd><button id="clearSearch" class="search-clear" aria-label="Clear search">×</button><div id="searchSuggestions" class="search-suggestions" hidden></div></div>
+    <div class="actions"><button class="status-btn" id="systemBtn" aria-label="Open source status"><i id="liveDot"></i><span id="liveLabel">STARTING</span></button><button class="icon-btn" id="refresh" aria-label="Refresh">↻</button><button class="icon-btn" id="theme" aria-label="Change theme">◐</button></div>
   </div>
-</nav>
+  <section id="flashRail" class="flash-rail" hidden aria-live="polite"><div class="flash-label"><i></i><span>FLASH</span><small id="flashCount">0</small></div><div id="flashList" class="flash-list"></div></section>
+  <div class="ticker"><span class="ticker-label"><i></i>INDIA NOW</span><span id="editionDate" class="ticker-date">—</span><button id="tickerBtn" class="ticker-story">Waiting for verified reports…</button><time id="clock">—</time></div>
+
+  <!-- V24: Top-level category navigation -->
+  <nav class="category-bar" id="categoryBar">
+    <div class="category-bar-inner">
+      <div id="topics" class="topics" aria-label="News categories"></div>
+    </div>
+  </nav>
+</header>
 
 <main class="page">
   <section class="front-intro">
@@ -45,9 +47,8 @@
         <div class="stack-wrap">
           <div class="stack-label"><span>STORY STACK</span><small id="stackCount">—</small></div>
           <div id="storyStack" class="story-stack"></div>
-          <div class="stack-controls"><button class="stack-btn" id="stackPrev" aria-label="Previous story">‹</button><span id="stackPosition">0 / 0</span><div id="stackDots" class="stack-dots"></div><button class="stack-btn" id="stackNext" aria-label="Next story">›</button></div>
+          <div class="stack-controls"><button class="stack-btn" id="stackPrev" aria-label="Previous story">‹</button><span id="stackPosition" class="stack-position">0 / 0</span><div id="stackDots" class="stack-dots"></div><button class="stack-btn" id="stackNext" aria-label="Next story">›</button></div>
           <div id="stackInsight" class="stack-insight"></div>
-          <article id="stackAnalysis" class="stack-analysis"></article>
         </div>
         <aside class="india-now-panel" id="indiaNowPanel">
           <div class="panel-title"><span id="happeningPanelTitle">INDIA NOW</span><em id="indiaNowCount">—</em></div>
@@ -56,22 +57,20 @@
       </div>
     </section>
 
-    <!-- V24: Market Pulse as full-width card below Top News -->
+    <!-- Compact Market Overview Tape on Home (Full view available on Markets tab) -->
     <section class="market-section" id="marketSection">
-      <aside class="market-pulse" id="marketPulse">
-        <div class="market-head">
-          <div class="market-brand">
-            <span class="market-pulse-dot"></span>
-            <span class="market-title">MARKET PULSE</span>
-            <span class="market-subtitle">Live indices, FX &amp; commodities transmission</span>
-          </div>
-          <div class="market-meta">
-            <span class="market-badge-live">LIVE FEED</span>
-            <em id="marketObservedLabel">Observed</em>
-          </div>
+      <div class="market-overview-tape" id="marketPulse">
+        <div class="market-ribbon-head">
+          <span class="market-pulse-dot"></span>
+          <span class="market-title">MARKET PULSE</span>
+          <span class="market-badge-live">LIVE</span>
         </div>
         <div id="marketGroups" class="market-groups"></div>
-      </aside>
+        <button class="market-full-link" id="marketFullLink" aria-label="Open Full Markets Desk">
+          <span>FULL DESK</span>
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
     </section>
 
     <section id="returnStrip" class="return-strip" hidden><div><span class="return-kicker">SINCE YOU WERE AWAY</span><b id="returnTitle">—</b></div><div id="returnList" class="return-list"></div></section>
@@ -102,17 +101,16 @@
   <section id="searchView" class="search-view" hidden><div class="search-head"><span class="section-kicker">SEARCH</span><h2 id="searchTitle">Results</h2></div><div id="searchResults" class="search-results"></div></section>
 </main>
 
-<!-- HisabKitab / Aetheria Mobile Floating Command Dock (5 core destinations: Home | Radar | Follow Up | Replay | More) -->
+<!-- HisabKitab / Aetheria Mobile Command Dock (5 core destinations: Home | Categories | Follow Up | Replay | More) -->
 <nav class="bottom-nav" id="bottomNav" aria-label="Command Dock">
   <div class="dock-container">
     <button class="bnav-item active" data-nav="home" aria-label="Home">
       <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 001 1h3a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1h3a1 1 0 001-1V10"/></svg>
       <span>Home</span>
     </button>
-    <button class="bnav-item" data-nav="radar" aria-label="News Radar">
-      <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 9 9"/><path d="M12 7a5 5 0 0 1 5 5"/></svg>
-      <span>Radar</span>
-      <i class="bnav-badge" id="bnavInsightsBadge" hidden></i>
+    <button class="bnav-item" data-nav="categories" aria-label="Categories">
+      <svg class="bnav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
+      <span>Categories</span>
     </button>
     <button class="bnav-item bnav-followup" data-nav="followup" aria-label="Follow Up">
       <div class="bnav-follow-btn">
@@ -132,10 +130,29 @@
   </div>
 </nav>
 
-<div id="storyModal" class="modal" aria-hidden="true"><div class="modal-backdrop" id="modalBackdrop"></div><section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+<!-- Instant Category Navigation Drawer / Sheet -->
+<aside id="categoriesDrawer" class="drawer" aria-hidden="true">
+  <div class="drawer-backdrop" id="categoriesBackdrop"></div>
+  <section class="drawer-panel categories-panel" role="dialog" aria-modal="true" aria-label="Categories">
+    <div class="drawer-head">
+      <div>
+        <span class="drawer-kicker">INTELLIGENCE DESKS</span>
+        <h2>Categories</h2>
+      </div>
+      <button id="categoriesClose" class="modal-close" aria-label="Close categories">×</button>
+    </div>
+    <div class="categories-search-box">
+      <input type="text" id="categoriesFilter" placeholder="Filter categories…" autocomplete="off">
+    </div>
+    <div id="categoriesGrid" class="categories-grid"></div>
+  </section>
+</aside>
+
+<!-- Aetheris Read: Living Story Intelligence & Context Reader -->
+<div id="storyModal" class="modal aetheris-read-modal" aria-hidden="true"><div class="modal-backdrop" id="modalBackdrop"></div><section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
   <button id="modalClose" class="modal-close" aria-label="Close">×</button>
-  <div class="modal-top-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">
-    <div id="modalKicker" class="modal-kicker" style="margin:0;">LIVING STORY</div>
+  <div class="modal-top-row">
+    <div id="modalKicker" class="modal-kicker">AETHERIS READ · LIVING STORY INTELLIGENCE</div>
     <button id="modalFollowBtn" class="follow-action-btn" aria-label="Follow Event">
       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       <span id="modalFollowText">+ Follow Event</span>

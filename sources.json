@@ -1,12 +1,121 @@
 [
   {
-    "name": "GDELT Global Article Firehose",
-    "provider": "GDELT",
+    "name": "Google News India",
+    "provider": "Google News",
+    "topic": "India",
+    "url": "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en",
+    "tier": "publisher",
+    "interval_sec": 90,
+    "max_items": 100,
+    "country": "IN",
+    "language": "en"
+  },
+  {
+    "name": "Google News India National",
+    "provider": "Google News",
+    "topic": "India",
+    "url": "https://news.google.com/rss/headlines/section/topic/NATION?hl=en-IN&gl=IN&ceid=IN:en",
+    "tier": "publisher",
+    "interval_sec": 90,
+    "max_items": 100,
+    "country": "IN",
+    "language": "en"
+  },
+  {
+    "name": "Google News World",
+    "provider": "Google News",
     "topic": "World",
-    "url": "https://data.gdeltproject.org/gdeltv3/gal/feed.rss",
-    "tier": "discovery",
-    "interval_sec": 60,
-    "max_items": 300
+    "url": "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-IN&gl=IN&ceid=IN:en",
+    "tier": "publisher",
+    "interval_sec": 90,
+    "max_items": 100,
+    "language": "en"
+  },
+  {
+    "name": "Google News Business & Markets",
+    "provider": "Google News",
+    "topic": "Business",
+    "url": "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-IN&gl=IN&ceid=IN:en",
+    "tier": "publisher",
+    "interval_sec": 90,
+    "max_items": 100,
+    "country": "IN",
+    "language": "en"
+  },
+  {
+    "name": "Google News Technology",
+    "provider": "Google News",
+    "topic": "Technology",
+    "url": "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-IN&gl=IN&ceid=IN:en",
+    "tier": "publisher",
+    "interval_sec": 90,
+    "max_items": 100,
+    "language": "en"
+  },
+  {
+    "name": "Google News Legal India",
+    "provider": "Google News",
+    "topic": "Legal",
+    "url": "https://news.google.com/rss/search?q=Supreme+Court+OR+High+Court+OR+judiciary+India&hl=en-IN&gl=IN&ceid=IN:en",
+    "tier": "publisher",
+    "interval_sec": 90,
+    "max_items": 100,
+    "country": "IN",
+    "language": "en"
+  },
+  {
+    "name": "PIB India Official Releases",
+    "provider": "Press Information Bureau",
+    "topic": "India",
+    "url": "https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1",
+    "tier": "official",
+    "interval_sec": 120,
+    "max_items": 80,
+    "country": "IN",
+    "language": "en"
+  },
+  {
+    "name": "The Hindu Top Stories",
+    "provider": "The Hindu",
+    "topic": "India",
+    "url": "https://www.thehindu.com/news/feeder/default.rss",
+    "tier": "publisher",
+    "interval_sec": 120,
+    "max_items": 60,
+    "country": "IN",
+    "language": "en"
+  },
+  {
+    "name": "Times of India Top",
+    "provider": "Times of India",
+    "topic": "India",
+    "url": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
+    "tier": "publisher",
+    "interval_sec": 120,
+    "max_items": 60,
+    "country": "IN",
+    "language": "en"
+  },
+  {
+    "name": "LiveMint Latest News",
+    "provider": "LiveMint",
+    "topic": "Markets",
+    "url": "https://www.livemint.com/rss/news",
+    "tier": "publisher",
+    "interval_sec": 120,
+    "max_items": 60,
+    "country": "IN",
+    "language": "en"
+  },
+  {
+    "name": "BBC News World",
+    "provider": "BBC",
+    "topic": "World",
+    "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "tier": "publisher",
+    "interval_sec": 120,
+    "max_items": 60,
+    "language": "en"
   },
   {
     "name": "GDELT World Discovery",

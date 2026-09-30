@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import hashlib
+import gzip
 import math
 import html
 import json
@@ -58,7 +59,7 @@ CONNECT_TIMEOUT = float(os.environ.get("AETHERIA_CONNECT_TIMEOUT", "2.5"))
 RETENTION_DAYS = int(os.environ.get("AETHERIA_RETENTION_DAYS", "30"))
 EVENT_ACTIVE_HOURS = float(os.environ.get("AETHERIA_EVENT_ACTIVE_HOURS", "72"))
 EVENT_POOL_LIMIT = int(os.environ.get("AETHERIA_EVENT_POOL_LIMIT", "5000"))
-SNAPSHOT_EVENT_LIMIT = int(os.environ.get("AETHERIA_SNAPSHOT_EVENT_LIMIT", "1400"))
+SNAPSHOT_EVENT_LIMIT = int(os.environ.get("AETHERIA_SNAPSHOT_EVENT_LIMIT", "180"))
 LOCAL_ANALYSIS_SNIPPETS = int(os.environ.get("AETHERIA_LOCAL_ANALYSIS_SNIPPETS", "8"))
 LATEST_LANE_LIMIT = int(os.environ.get("AETHERIA_LATEST_LANE_LIMIT", "400"))
 SECONDARY_LANE_LIMIT = int(os.environ.get("AETHERIA_SECONDARY_LANE_LIMIT", "18"))
@@ -102,7 +103,7 @@ URGENT = set("breaking urgent emergency warning attack explosion earthquake tsun
 
 CATEGORIES = [
     ("Top", "Top"), ("World", "World"), ("India", "India"), ("Local", "Local"), ("Politics", "Politics"),
-    ("Geopolitics", "Geopolitics"), ("Business", "Business"), ("Markets", "Markets"), ("Economy", "Economy"),
+    ("Geopolitics", "Geopolitics"), ("Legal", "Legal"), ("Business", "Business"), ("Markets", "Markets"), ("Economy", "Economy"),
     ("Technology", "Technology"), ("AI", "AI"), ("Science", "Science"), ("Space", "Space"), ("Health", "Health"),
     ("Climate", "Climate"), ("Weather", "Weather"), ("Sports", "Sports"), ("Entertainment", "Entertainment"),
     ("Culture", "Culture"), ("Property", "Property"), ("Energy", "Energy"), ("Commodities", "Commodities"),
@@ -124,7 +125,8 @@ TOPIC_TERMS = {
     "Climate": set("climate climate change emissions carbon greenhouse warming drought heatwave biodiversity environment pollution conservation".split()),
     "Weather": set("weather storm storms cyclone cyclones hurricane hurricanes flood floods earthquake earthquakes tsunami wildfire wildfires tornado rainfall rain snow heat cold warning evacuation volcano".split()),
     "Geopolitics": set("geopolitics diplomacy diplomatic conflict war wars sanctions tariff tariffs treaty treaties military defence defense border nato iran israel palestine gaza russia ukraine china taiwan missile ceasefire security".split()),
-    "Politics": set("politics political parliament congress senate election elections vote voting government minister president prime minister opposition party parties legislation bill court supreme policy campaign".split()),
+    "Politics": set("politics political parliament congress senate election elections vote voting government minister president prime minister opposition party parties legislation bill policy campaign".split()),
+    "Legal": set("court courts supreme high judge judges bench verdict ruling bail trial petition petitioner lawsuit litigation lawyer lawyers advocate advocates legal justice criminal civil constitutional arbitration tribunal judgment prosecution ed cbi nia fir bar council sc hc order appeal affidavit habeas corpus remand chargesheet convict acquitted jurisdiction stay injunction".split()),
     "India": set("india indian bharat delhi mumbai bengaluru bangalore hyderabad chennai kolkata punjab gujarat maharashtra rajasthan karnataka kerala tamil nadu telangana bihar up uttar pradesh madhya pradesh west bengal odisha assam jaipur ahmedabad pune lucknow".split()),
     "Local": set("municipal municipality civic corporation police traffic district neighbourhood neighborhood local court station metro airport road flyover housing authority civic body".split()),
     "Property": set("property real estate housing homes home prices rent rental mortgage apartment apartments commercial property residential construction builder developers development".split()),
@@ -382,7 +384,7 @@ def infer_topic(title: str, configured: str) -> str:
     when the article title carries a strong specialist topic signal.
     """
     t=tokens(title); scores={k:len(t&v) for k,v in TOPIC_TERMS.items()}
-    priority=["Sports","AI","Markets","Commodities","Energy","Technology","Science","Space","Health","Weather","Climate","Geopolitics","Politics","Business","Economy","Property","Travel","Education","Entertainment","Culture","Autos","India","Local"]
+    priority=["Sports","AI","Markets","Commodities","Energy","Technology","Science","Space","Health","Weather","Climate","Geopolitics","Legal","Politics","Business","Economy","Property","Travel","Education","Entertainment","Culture","Autos","India","Local"]
     best=max(priority,key=lambda k:(scores.get(k,0),-priority.index(k)))
     best_score=scores.get(best,0)
     broad={"World","All","Top"}
@@ -1291,22 +1293,22 @@ def build_enriched():
     out=[]; t=now()
     for r0 in rows:
         e=dict(r0)
-        age_h=max(0,(t-float(e["last_seen"] or t))/3600)
-        freshness=max(0,1-age_h/24)
-        base=float(e["significance"] or 0)*.52+freshness*.18+float(e["velocity"] or 0)*.10+float(e["corroboration"] or 0)*.08+float(e["authority"] or 0)*.07+float(e["novelty"] or 0)*.05
+        age_h=max(0.0,(t-float(e["last_seen"] or t))/3600.0)
+        freshness=max(0.0, 1.0 - (age_h / 24.0) ** 0.8) if age_h <= 36.0 else 0.0
+        recency_mult=1.0 if age_h <= 8.0 else (0.85 if age_h <= 16.0 else (0.50 if age_h <= 24.0 else (0.20 if age_h <= 48.0 else 0.05)))
+        base=(float(e["significance"] or 0)*.38+freshness*.36+float(e["velocity"] or 0)*.12+float(e["corroboration"] or 0)*.07+float(e["authority"] or 0)*.04+float(e["novelty"] or 0)*.03)*recency_mult
         lr=learn_map.get(e["topic"])
         if lr and lr[1]>=8:
             base*=max(.92,min(1.10,1+(lr[0]-.20)*.20))
         impact=.45*float(e["significance"] or 0)+.18*float(e["urgency"] or 0)+.12*float(e["financial_relevance"] or 0)+.12*float(e["geopolitical_relevance"] or 0)+.13*float(e["supply_chain_relevance"] or 0)
-        published_ts=float(meta_map[e["id"]]["published"]) if e["id"] in meta_map and meta_map[e["id"]]["published"] else 0.0
+        published_raw=float(meta_map[e["id"]]["published"]) if e["id"] in meta_map and meta_map[e["id"]]["published"] else 0.0
+        published_ts=published_raw if (t - 86400 * 30 <= published_raw <= t + 7200) else float(e["last_seen"] or 0)
         latest=max(published_ts,float(e["last_seen"] or 0))
-        moving=float(e["velocity"] or 0)*.60+freshness*.25+float(e["novelty"] or 0)*.15
-        flash=(.34*float(e["urgency"] or 0)+.24*float(e["velocity"] or 0)+.18*freshness+.14*float(e["significance"] or 0)+.06*float(e["authority"] or 0)+.04*float(e["corroboration"] or 0))
+        moving=(float(e["velocity"] or 0)*.60+freshness*.25+float(e["novelty"] or 0)*.15)*recency_mult
+        flash=(.34*float(e["urgency"] or 0)+.24*float(e["velocity"] or 0)+.18*freshness+.14*float(e["significance"] or 0)+.06*float(e["authority"] or 0)+.04*float(e["corroboration"] or 0))*recency_mult
         obj=_serialize_event(e,meta_map,base)
         india_lens=float(obj.get("india_lens_score") or 0)
-        # Homepage editorial score: freshness + gravity first, with a meaningful
-        # India lens boost. The chronological Latest feed remains chronological.
-        editorial=(freshness*.30+float(e["significance"] or 0)*.27+float(e["velocity"] or 0)*.12+float(e["corroboration"] or 0)*.08+float(e["authority"] or 0)*.06+india_lens*.14+flash*.03)
+        editorial=(freshness*.46+float(e["significance"] or 0)*.20+float(e["velocity"] or 0)*.12+float(e["corroboration"] or 0)*.06+india_lens*.14+flash*.02)*recency_mult
         obj["flash_score"]=round(max(0.0,min(1.0,flash)),3)
         obj["is_flash"]=bool(flash>=.72 and freshness>=.20 and (float(e["urgency"] or 0)>=.45 or int(e["source_count"] or 0)>=2 or int(e["official_count"] or 0)>0))
         out.append({"raw":e,"important_score":base,"impact_score":impact,"latest_score":latest,"moving_score":moving,"flash_score":flash,"editorial_score":editorial,"obj":obj})
@@ -1722,7 +1724,9 @@ def build_home_payload(enriched, ranked_latest, important_objs, impact_objs, fut
         velocity=float(o.get("velocity") or 0)
         return freshness*.42 + india*.32 + sig*.16 + velocity*.10
 
-    editorial_pool=sorted([x for x in enriched if x["obj"]["id"] not in flash_ids], key=lambda x:(x.get("editorial_score",0),x.get("latest_score",0)), reverse=True)
+    fresh_editorial=[x for x in enriched if x["obj"]["id"] not in flash_ids and max(0.0,(now_ts-float(x["obj"].get("last_seen") or now_ts))/3600.0)<=36.0]
+    editorial_candidates=fresh_editorial if len(fresh_editorial)>=4 else [x for x in enriched if x["obj"]["id"] not in flash_ids]
+    editorial_pool=sorted(editorial_candidates, key=lambda x:(x.get("editorial_score",0),x.get("latest_score",0)), reverse=True)
     stack=[x["obj"] for x in editorial_pool[:10]]
     # If the live pool is temporarily smaller, keep a true latest-first fallback from
     # already verified events, never fabricate stories.
@@ -2026,61 +2030,94 @@ def event_detail(eid):
             "ai_capabilities":intelligence_status()}
 
 def search_events(query,limit=60):
-    q=str(query or "").strip()
-    terms=[x for x in tokens(q) if len(x)>1][:8]
-    if not terms:
+    q=clean_text(str(query or "")).strip()
+    if not q or len(q)<1:
         return []
+    q_lower=q.lower()
+    terms=[x for x in tokens(q) if len(x)>1][:10]
+    results_map={}
+
+    # 1. Search in-memory snapshot for instant, fresh matching across all fields
+    with SNAPSHOT_LOCK:
+        snap_pool=list(SNAPSHOT.get("latest") or []) + list(SNAPSHOT.get("events") or [])
+    for e in snap_pool:
+        eid=e.get("id")
+        if not eid or eid in results_map:
+            continue
+        hay=" ".join([
+            str(e.get("title") or ""),
+            str(e.get("summary") or ""),
+            str(e.get("topic") or ""),
+            str(e.get("domain") or ""),
+            " ".join(str(x) for x in (e.get("entities") or [])),
+            " ".join(str(x) for x in (e.get("locations") or [])),
+            " ".join(str(x) for x in (e.get("key_phrases") or [])),
+        ]).lower()
+        if q_lower in hay or any(t in hay for t in terms):
+            hits=sum(1 for t in terms if t in hay) + (3 if q_lower in hay else 0)
+            score=hits*25 + float((e.get("intelligence") or {}).get("confidence") or 0.5)*40 + float((e.get("intelligence") or {}).get("impact") or 0.5)*35
+            ec=dict(e)
+            ec["score"]=round(score,1)
+            results_map[eid]=ec
+
+    # 2. Database search across title, summary, topic, entities, locations, domain
     cutoff=now()-30*86400
     con=None
     try:
         con=db_read()
         rows=[]
-        try:
-            match=" OR ".join('"'+t.replace('"','')+'"*' for t in terms)
-            rows=con.execute("SELECT e.id FROM event_fts f JOIN events e ON e.id=f.event_id WHERE f MATCH ? AND e.last_seen>? ORDER BY bm25(f) LIMIT 120",(match,cutoff)).fetchall()
-        except Exception:
-            rows=[]
+        if terms:
+            try:
+                match=" OR ".join('"'+t.replace('"','')+'"*' for t in terms)
+                rows=con.execute("SELECT e.id FROM event_fts f JOIN events e ON e.id=f.event_id WHERE f MATCH ? AND e.last_seen>? ORDER BY bm25(f) LIMIT 120",(match,cutoff)).fetchall()
+            except Exception:
+                rows=[]
 
-        # SQLite FTS tokenization is not reliable for every Indic script. When
-        # FTS returns no match, fall back to Unicode-safe title/summary matching.
-        if not rows:
-            clauses=[]; params=[cutoff]
-            for t in terms:
-                clauses.append("(lower(e.title) LIKE ? OR lower(COALESCE(e.summary,'')) LIKE ? OR lower(COALESCE(a.title,'')) LIKE ? OR lower(COALESCE(a.description,'')) LIKE ?)")
-                params += [f"%{t}%",f"%{t}%",f"%{t}%",f"%{t}%"]
-            rows=con.execute("""SELECT DISTINCT e.id FROM events e
-                LEFT JOIN event_articles ea ON ea.event_id=e.id
-                LEFT JOIN articles a ON a.id=ea.article_id
-                WHERE e.last_seen>? AND ("""+" OR ".join(clauses)+") ORDER BY e.last_seen DESC LIMIT 120",params).fetchall()
+        clauses=[]; params=[cutoff]
+        search_needles = [q_lower] + [t for t in terms if t != q_lower]
+        for needle in search_needles[:6]:
+            clauses.append("(lower(e.title) LIKE ? OR lower(COALESCE(e.summary,'')) LIKE ? OR lower(COALESCE(e.topic,'')) LIKE ? OR lower(COALESCE(e.entities,'')) LIKE ? OR lower(COALESCE(e.locations,'')) LIKE ? OR lower(COALESCE(a.title,'')) LIKE ? OR lower(COALESCE(a.description,'')) LIKE ? OR lower(COALESCE(a.domain,'')) LIKE ?)")
+            params += [f"%{needle}%"]*8
 
-        ids=[r["id"] for r in rows]
-        if not ids:
-            return []
-        marks=",".join("?" for _ in ids)
-        erows=con.execute(f"SELECT * FROM events WHERE id IN ({marks})",ids).fetchall()
-        meta=con.execute(f"""SELECT ea.event_id,
-          MAX(CASE WHEN a.id=e.primary_article_id THEN a.canonical_url END) primary_url,
-          MAX(CASE WHEN a.id=e.primary_article_id THEN a.domain END) primary_domain,
-          MAX(CASE WHEN a.id=e.primary_article_id THEN a.image_url END) image_url,
-          MAX(CASE WHEN a.id=e.primary_article_id THEN a.published END) published,
-          MAX(CASE WHEN a.id=e.primary_article_id THEN a.description END) description,
-          GROUP_CONCAT(DISTINCT a.domain) domains, GROUP_CONCAT(DISTINCT a.language) languages
-        FROM event_articles ea JOIN articles a ON a.id=ea.article_id JOIN events e ON e.id=ea.event_id WHERE ea.event_id IN ({marks}) GROUP BY ea.event_id, e.id, e.primary_article_id""",ids).fetchall()
-    except Exception:
-        return []
+        db_rows=con.execute("""SELECT DISTINCT e.id FROM events e
+            LEFT JOIN event_articles ea ON ea.event_id=e.id
+            LEFT JOIN articles a ON a.id=ea.article_id
+            WHERE e.last_seen>? AND ("""+" OR ".join(clauses)+") ORDER BY e.last_seen DESC LIMIT 120",params).fetchall()
+        all_ids=list(dict.fromkeys([r["id"] for r in (rows+db_rows)]))
+        needed_ids=[x for x in all_ids if x not in results_map][:80]
+
+        if needed_ids:
+            marks=",".join("?" for _ in needed_ids)
+            erows=con.execute(f"SELECT * FROM events WHERE id IN ({marks})",needed_ids).fetchall()
+            meta=con.execute(f"""SELECT ea.event_id,
+              MAX(CASE WHEN a.id=e.primary_article_id THEN a.canonical_url END) primary_url,
+              MAX(CASE WHEN a.id=e.primary_article_id THEN a.domain END) primary_domain,
+              MAX(CASE WHEN a.id=e.primary_article_id THEN a.image_url END) image_url,
+              MAX(CASE WHEN a.id=e.primary_article_id THEN a.published END) published,
+              MAX(CASE WHEN a.id=e.primary_article_id THEN a.description END) description,
+              GROUP_CONCAT(DISTINCT a.domain) domains, GROUP_CONCAT(DISTINCT a.language) languages
+            FROM event_articles ea JOIN articles a ON a.id=ea.article_id JOIN events e ON e.id=ea.event_id WHERE ea.event_id IN ({marks}) GROUP BY ea.event_id, e.id, e.primary_article_id""",needed_ids).fetchall()
+            meta_map={m["event_id"]:m for m in meta}
+            for r in erows:
+                o=_serialize_event(dict(r),meta_map)
+                hay=" ".join([
+                    str(o.get("title") or ""),
+                    str(o.get("summary") or ""),
+                    str(o.get("topic") or ""),
+                    str(o.get("domain") or ""),
+                    str(o.get("description") or ""),
+                ]).lower()
+                hits=sum(1 for t in terms if t in hay) + (3 if q_lower in hay else 0)
+                o["score"]=round((hits*20+float((o.get("intelligence") or {}).get("confidence") or 0.5)*40+float((o.get("intelligence") or {}).get("impact") or 0.5)*35),1)
+                results_map[o["id"]]=o
+    except Exception as exc:
+        print(f"[Aetheria search warning] {type(exc).__name__}: {str(exc)[:180]}", flush=True)
     finally:
         if con:
             con.close()
 
-    meta_map={m["event_id"]:m for m in meta}
-    enriched=[]
-    for r in erows:
-        o=_serialize_event(dict(r),meta_map)
-        hay=(o["title"]+" "+(o.get("description") or "")).lower()
-        hits=sum(t in hay for t in terms)
-        o["score"]=round((hits*20+o["intelligence"]["confidence"]*45+o["intelligence"]["impact"]*35),1)
-        enriched.append(o)
-    enriched.sort(key=lambda x:(x["score"],x.get("published") or 0),reverse=True)
+    enriched=list(results_map.values())
+    enriched.sort(key=lambda x:(x.get("score",0),x.get("last_seen") or x.get("published") or 0),reverse=True)
     return enriched[:max(1,min(60,limit))]
 
 
@@ -2447,9 +2484,20 @@ def toggle_follow(session: str, event_id: str, action: str = "follow") -> dict:
 class Handler(BaseHTTPRequestHandler):
     protocol_version="HTTP/1.1"
     def send_json(self,status,payload,etag=None,send_body=True):
-        body=json.dumps(payload,ensure_ascii=False,separators=(",",":")).encode(); self.send_response(status); self.send_header("Content-Type","application/json; charset=utf-8"); self.send_header("Cache-Control","no-store"); self.send_header("Content-Length",str(len(body))); self.send_header("Access-Control-Allow-Origin","*");
+        body=json.dumps(payload,ensure_ascii=False,separators=(",",":")).encode("utf-8")
+        accept=str(self.headers.get("Accept-Encoding","") if hasattr(self,"headers") and self.headers else "").lower()
+        use_gzip="gzip" in accept and len(body)>1024
+        if use_gzip:
+            body=gzip.compress(body,compresslevel=6)
+        self.send_response(status)
+        self.send_header("Content-Type","application/json; charset=utf-8")
+        self.send_header("Cache-Control","no-store")
+        if use_gzip:
+            self.send_header("Content-Encoding","gzip")
+        self.send_header("Content-Length",str(len(body)))
+        self.send_header("Access-Control-Allow-Origin","*")
         if etag: self.send_header("ETag",etag)
-        self.end_headers();
+        self.end_headers()
         if status!=304 and send_body: self.wfile.write(body)
     def do_POST(self):
         path=urllib.parse.urlsplit(self.path).path
