@@ -24,7 +24,7 @@ function readingStore(){try{return JSON.parse(localStorage.getItem('aetheria-rea
 function saveReading(eid,lastSeen,title){try{const m=readingStore();m[eid]={lastSeen:num(lastSeen),title:String(title||'').slice(0,220),readAt:Date.now()};const keys=Object.keys(m).sort((a,b)=>(m[b].readAt||0)-(m[a].readAt||0)).slice(0,300);const keep={};keys.forEach(k=>keep[k]=m[k]);localStorage.setItem('aetheria-reading-memory',JSON.stringify(keep))}catch{}}
 function renderReadingMemory(e){const box=$('readingMemory');if(!box)return;const m=readingStore()[e?.id];if(!m){box.hidden=true;box.innerHTML='';return}const changed=num(e?.last_seen)>num(m.lastSeen);box.hidden=false;box.innerHTML=`<span>READING MEMORY</span><b>You read this ${new Date(m.readAt).toLocaleDateString([], {day:'numeric',month:'short'})}.</b>${changed?`<p>${age(e.last_seen)} since then · the living story has new activity.</p>`:`<p>This story has not changed since your last read.</p>`}`;}
 function restoreUi(){try{const x=JSON.parse(sessionStorage.getItem('aetheria-ui')||'null');if(!x)return;if(typeof x.topic==='string')state.topic=x.topic;if([5,14,30].includes(Number(x.depth)))state.depth=Number(x.depth);if(Number.isFinite(Number(x.stackIndex)))state.stackIndex=Math.max(0,Number(x.stackIndex));state.scrollY=Number(x.scrollY)||0}catch{}}
-function cacheBootstrap(d){try{sessionStorage.setItem('aetheria-bootstrap',JSON.stringify({version:d.version,revision:d.revision,latest:(d.latest||[]).slice(0,350),events:(d.events||[]).slice(0,1200),flash:(d.flash||[]).slice(0,12),impact:(d.impact||[]).slice(0,25),moving:(d.moving||[]).slice(0,18),sections:d.sections||[],categories:d.categories||[],future:d.future||[],market:d.market||{},home:d.home||{},state:d.state||{},cached_at:Date.now()}))}catch{}}
+function cacheBootstrap(d){try{sessionStorage.setItem('aetheria-bootstrap',JSON.stringify({version:d.version,revision:d.revision,latest:(d.latest||[]).slice(0,800),events:(d.events||[]).slice(0,1200),flash:(d.flash||[]).slice(0,12),impact:(d.impact||[]).slice(0,25),moving:(d.moving||[]).slice(0,18),sections:d.sections||[],categories:d.categories||[],future:d.future||[],market:d.market||{},home:d.home||{},state:d.state||{},cached_at:Date.now()}))}catch{}}
 function hydrateCached(){try{const d=JSON.parse(sessionStorage.getItem('aetheria-bootstrap')||'null');if(!d||!Array.isArray(d.latest)||!d.latest.length)return false;Object.assign(state,{revision:num(d.revision),events:d.events||[],flash:d.flash||[],impact:d.impact||[],latest:d.latest||[],moving:d.moving||[],sections:d.sections||[],future:d.future||[],market:d.market||{},home:d.home||{},categories:d.categories||[],serverState:d.state||{},initialized:true});$('liveLabel').textContent='UPDATING';$('liveDot').className='live-check';render();return true}catch{return false}}
 function renderCategories(){
   const preferred=['India','World','Markets','Business','Technology','Legal','Geopolitics','Sports','Entertainment','Local'];
@@ -121,10 +121,14 @@ function stackCard(e,pos,originalIndex){
 }
 function formatMarket(v,symbol){const n=num(v);if(!n)return'—';if(['USD/INR','EUR/INR','GBP/INR','AED/INR'].includes(String(symbol||'')))return n.toFixed(2);if(String(symbol||'').startsWith('JPY/INR'))return n.toFixed(4);return n.toLocaleString(undefined,{maximumFractionDigits:2})}
 function renderMarket(){
-  const el=$("marketGroups");if(!el)return;
+  const tapeEl=$("marketGroups");
+  const deskContainer=$("marketDeskContainer");
+  const deskZone=$("marketDeskZone");
+  const mSec=$("marketSection");
   const groups=state.market?.groups||[];
-  if(!groups.length){el.innerHTML='<div class="empty-state">Market data is currently syncing.</div>';return}
+
   const isTop=state.topic==='Top'||state.topic==='All';
+  const isMarketTab=state.topic==='Markets';
 
   const obsLabel=$("marketObservedLabel");
   if(obsLabel&&state.market?.at){
@@ -132,42 +136,88 @@ function renderMarket(){
     obsLabel.textContent=a==='now'||a==='—'?'LIVE':`LIVE · ${a}`;
   }
 
-  // Wire full desk button on Home
-  const fullBtn=$('marketFullLink');
-  if(fullBtn){
-    fullBtn.style.display=isTop?'inline-flex':'none';
-    fullBtn.onclick=()=>{
-      state.topic='Markets';
-      state.searchMode=false;
-      state.depth=14;
-      state.stackIndex=0;
-      persistUi();
-      render();
-      window.scrollTo({top:0,behavior:'smooth'});
-    };
-  }
-
+  // 1. Home / Top view: compact single-row ribbon ticker
   if(isTop){
-    // Compact Market Overview Tape on Home Page
-    const allItems=[];
-    groups.forEach(g=>(g.items||[]).forEach(it=>allItems.push(it)));
-    const prioritySymbols=['NIFTY 50','SENSEX','USD/INR','BRENT CRUDE','GOLD','S&P 500','NASDAQ 100'];
-    const chosen=[];
-    prioritySymbols.forEach(sym=>{
-      const match=allItems.find(it=>String(it.symbol||it.label||'').toUpperCase()===sym.toUpperCase()||String(it.label||'').toUpperCase().includes(sym.toUpperCase()));
-      if(match&&!chosen.some(x=>x.symbol===match.symbol))chosen.push(match);
-    });
-    if(chosen.length<6){
-      allItems.forEach(it=>{if(chosen.length<8&&!chosen.some(x=>x.symbol===it.symbol))chosen.push(it);});
+    if(deskZone) deskZone.hidden=true;
+    if(mSec) mSec.hidden=false;
+
+    const fullBtn=$('marketFullLink');
+    if(fullBtn){
+      fullBtn.style.display='inline-flex';
+      fullBtn.onclick=()=>{
+        state.topic='Markets';
+        state.searchMode=false;
+        state.depth=14;
+        state.stackIndex=0;
+        persistUi();
+        render();
+        window.scrollTo({top:0,behavior:'smooth'});
+      };
     }
 
-    const tapeHtml=chosen.map(x=>{
+    if(tapeEl){
+      if(!groups.length){
+        tapeEl.innerHTML='<div class="empty-state">Market data is syncing…</div>';
+      } else {
+        const allItems=[];
+        groups.forEach(g=>(g.items||[]).forEach(it=>allItems.push(it)));
+        const prioritySymbols=['NIFTY 50','SENSEX','USD/INR','BRENT CRUDE','GOLD','S&P 500','NASDAQ 100'];
+        const chosen=[];
+        prioritySymbols.forEach(sym=>{
+          const match=allItems.find(it=>String(it.symbol||it.label||'').toUpperCase()===sym.toUpperCase()||String(it.label||'').toUpperCase().includes(sym.toUpperCase()));
+          if(match&&!chosen.some(x=>x.symbol===match.symbol))chosen.push(match);
+        });
+        if(chosen.length<6){
+          allItems.forEach(it=>{if(chosen.length<8&&!chosen.some(x=>x.symbol===it.symbol))chosen.push(it);});
+        }
+
+        tapeEl.innerHTML=chosen.map(x=>{
+          const name=esc(x.label||x.symbol||'Quote');
+          if(x.available===false||x.price==null){
+            return `<div class="market-tape-item"><span class="tape-name">${name}</span><span class="tape-price">—</span><span class="tape-badge flat">Closed</span></div>`;
+          }
+          const changeNum = x.change_num != null ? Number(x.change_num) : (x.change != null && x.price != null && x.previous_close ? Number(x.price) - Number(x.previous_close) : (x.change != null && x.price != null ? Number(x.price) * Number(x.change) : null));
+          const changePct = x.change != null ? Number(x.change) * 100 : null;
+          let changeText = '—';
+          let changeClass = 'flat';
+          if (changePct != null || changeNum != null) {
+            const isUp = (changeNum != null ? changeNum >= 0 : changePct >= 0);
+            changeClass = isUp ? 'up' : 'down';
+            const numStr = changeNum != null ? `${isUp ? '+' : ''}${changeNum.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '';
+            const pctStr = changePct != null ? `${isUp ? '+' : ''}${changePct.toFixed(2)}%` : '';
+            if (numStr && pctStr) changeText = `${isUp ? '▲' : '▼'} ${numStr} (${pctStr})`;
+            else if (pctStr) changeText = `${isUp ? '▲' : '▼'} ${pctStr}`;
+            else if (numStr) changeText = `${isUp ? '▲' : '▼'} ${numStr}`;
+          }
+          return `<div class="market-tape-item"><span class="tape-name">${name}</span><span class="tape-price">${formatMarket(x.price,x.symbol)}</span><span class="tape-badge ${changeClass}">${changeText}</span></div>`;
+        }).join('');
+      }
+    }
+    return;
+  }
+
+  // 2. Dedicated Markets Page: Professional Solid Market Desk (NO GLASS, Tabbed, High-Contrast, Mobile-friendly)
+  if(isMarketTab && deskContainer){
+    if(mSec) mSec.hidden=true;
+    if(deskZone) deskZone.hidden=false;
+
+    if(!groups.length){
+      deskContainer.innerHTML='<div class="empty-state">Market data is currently syncing.</div>';
+      return;
+    }
+
+    if(!state.marketTab||!groups.some(g=>g.id===state.marketTab))state.marketTab=groups[0]?.id||'india';
+    const tabs=groups.map(g=>`<button class="market-tab-btn ${state.marketTab===g.id?'active':''}" data-tab="${esc(g.id)}">${esc(g.label)}</button>`).join('');
+    const activeGroup=groups.find(g=>g.id===state.marketTab)||groups[0];
+    const items=(activeGroup?.items||[]).map(x=>{
       const name=esc(x.label||x.symbol||'Quote');
+      const curr=esc(x.currency||'');
       if(x.available===false||x.price==null){
-        return `<div class="market-tape-item"><span class="tape-name">${name}</span><span class="tape-price">—</span><span class="tape-badge flat">Closed</span></div>`;
+        return`<div class="market-card unavailable"><div class="m-card-header"><span class="m-card-name">${name}</span><small class="m-card-curr">${curr}</small></div><div class="m-card-body"><strong class="m-card-price">—</strong><span class="m-card-status">Closed / Syncing</span></div></div>`;
       }
       const changeNum = x.change_num != null ? Number(x.change_num) : (x.change != null && x.price != null && x.previous_close ? Number(x.price) - Number(x.previous_close) : (x.change != null && x.price != null ? Number(x.price) * Number(x.change) : null));
       const changePct = x.change != null ? Number(x.change) * 100 : null;
+
       let changeText = '—';
       let changeClass = 'flat';
       if (changePct != null || changeNum != null) {
@@ -179,44 +229,31 @@ function renderMarket(){
         else if (pctStr) changeText = `${isUp ? '▲' : '▼'} ${pctStr}`;
         else if (numStr) changeText = `${isUp ? '▲' : '▼'} ${numStr}`;
       }
-      return `<div class="market-tape-item"><span class="tape-name">${name}</span><span class="tape-price">${formatMarket(x.price,x.symbol)}</span><span class="tape-badge ${changeClass}">${changeText}</span></div>`;
+      return`<div class="market-card"><div class="m-card-header"><span class="m-card-name">${name}</span><span class="m-card-curr">${curr}</span></div><div class="m-card-body"><strong class="m-card-price">${formatMarket(x.price,x.symbol)}</strong><span class="m-card-badge ${changeClass}">${changeText}</span></div></div>`;
     }).join('');
 
-    el.innerHTML=tapeHtml;
+    deskContainer.innerHTML=`
+      <div class="market-desk-head">
+        <div class="desk-title-group">
+          <span class="m-desk-dot"></span>
+          <h2>MARKET PULSE</h2>
+          <span class="m-desk-live">LIVE DESK</span>
+        </div>
+        <div class="m-desk-meta">${esc(activeGroup?.source||'Real-time quotes')}</div>
+      </div>
+      <div class="market-tabs">${tabs}</div>
+      <div class="market-active-grid">${items}</div>
+    `;
+
+    deskContainer.querySelectorAll('.market-tab-btn').forEach(b=>b.onclick=()=>{
+      state.marketTab=b.dataset.tab;
+      renderMarket();
+    });
     return;
   }
 
-  // Dedicated Market Page: Full-Featured Market Desk
-  if(!state.marketTab||!groups.some(g=>g.id===state.marketTab))state.marketTab=groups[0]?.id||'india';
-  const tabs=groups.map(g=>`<button class="market-tab-btn ${state.marketTab===g.id?'active':''}" data-tab="${esc(g.id)}">${esc(g.label)}</button>`).join('');
-  const activeGroup=groups.find(g=>g.id===state.marketTab)||groups[0];
-  const items=(activeGroup?.items||[]).map(x=>{
-    const name=esc(x.label||x.symbol||'Quote');
-    const curr=esc(x.currency||'');
-    if(x.available===false||x.price==null){
-      return`<div class="market-card unavailable"><div class="m-card-header"><span class="m-card-name">${name}</span><small class="m-card-curr">${curr}</small></div><div class="m-card-body"><strong class="m-card-price">—</strong><span class="m-card-status">Closed / Syncing</span></div></div>`;
-    }
-    const changeNum = x.change_num != null ? Number(x.change_num) : (x.change != null && x.price != null && x.previous_close ? Number(x.price) - Number(x.previous_close) : (x.change != null && x.price != null ? Number(x.price) * Number(x.change) : null));
-    const changePct = x.change != null ? Number(x.change) * 100 : null;
-
-    let changeText = '—';
-    let changeClass = 'flat';
-    if (changePct != null || changeNum != null) {
-      const isUp = (changeNum != null ? changeNum >= 0 : changePct >= 0);
-      changeClass = isUp ? 'up' : 'down';
-      const numStr = changeNum != null ? `${isUp ? '+' : ''}${changeNum.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '';
-      const pctStr = changePct != null ? `${isUp ? '+' : ''}${changePct.toFixed(2)}%` : '';
-      if (numStr && pctStr) changeText = `${isUp ? '▲' : '▼'} ${numStr} (${pctStr})`;
-      else if (pctStr) changeText = `${isUp ? '▲' : '▼'} ${pctStr}`;
-      else if (numStr) changeText = `${isUp ? '▲' : '▼'} ${numStr}`;
-    }
-    return`<div class="market-card"><div class="m-card-header"><span class="m-card-name">${name}</span><span class="m-card-curr">${curr}</span></div><div class="m-card-body"><strong class="m-card-price">${formatMarket(x.price,x.symbol)}</strong><span class="m-card-badge ${changeClass}">${changeText}</span></div></div>`;
-  }).join('');
-  el.innerHTML=`<div class="market-full-desk"><div class="market-bar"><div class="market-tabs">${tabs}</div><div class="market-source-note">${esc(activeGroup?.source||'')}</div></div><div class="market-active-grid">${items}</div></div>`;
-  el.querySelectorAll('.market-tab-btn').forEach(b=>b.onclick=()=>{
-    state.marketTab=b.dataset.tab;
-    renderMarket();
-  });
+  if(mSec) mSec.hidden=true;
+  if(deskZone) deskZone.hidden=true;
 }
 
 function renderFlash(){const a=[...(state.home?.flash||state.flash||[])].filter(isFresh).sort((x,y)=>num(y.flash_score)-num(x.flash_score)||num(y.last_seen)-num(x.last_seen)).slice(0,4);const rail=$('flashRail');if(!rail)return;rail.hidden=!a.length;rail.style.display=a.length?'grid':'none';if(!a.length)return;$('flashCount').textContent=a.length||'';$('flashList').innerHTML=a.map(e=>`<article class="flash-item" data-event="${esc(e.id)}"><span class="flash-time">${age(e.last_seen||e.published)}</span><strong>${articleAnchor(e)}</strong><span class="flash-topic">${esc(e.topic||'WORLD')}</span>${originalLink(e)}</article>`).join('');wireStoryRows('flashList')}
@@ -303,13 +340,18 @@ function render(){
   const heading=$('latestHeading');if(heading)heading.textContent=isTop?'What just happened':`Latest ${state.topic} Coverage`;
   const subheading=$('latestSubheading');if(subheading)subheading.textContent=isTop?'Fresh event activity, with Aetheria analysis available on every story.':`Verified intelligence in ${state.topic}, organized chronologically.`;
   const mSec=$('marketSection');
-  if(mSec){
-    if(isTop||state.topic==='Markets'||state.topic==='Business'){
-      mSec.hidden=false;
-      renderMarket();
-    }else{
-      mSec.hidden=true;
-    }
+  const deskZone=$('marketDeskZone');
+  if(state.topic==='Markets'){
+    if(mSec) mSec.hidden=true;
+    if(deskZone) deskZone.hidden=false;
+    renderMarket();
+  } else if(isTop||state.topic==='Business'){
+    if(mSec) mSec.hidden=false;
+    if(deskZone) deskZone.hidden=true;
+    renderMarket();
+  } else {
+    if(mSec) mSec.hidden=true;
+    if(deskZone) deskZone.hidden=true;
   }
   renderFlash();renderStack();
   const h=state.home||{};
@@ -572,7 +614,7 @@ function toggleFollowUp(open){
   }
 }
 
-$('refresh').onclick=()=>{toast('Refreshing the world model…');refresh()};$('systemBtn').onclick=()=>toggleDrawer(true);$('drawerClose').onclick=()=>toggleDrawer(false);$('drawerBackdrop').onclick=()=>toggleDrawer(false);$('modalClose').onclick=closeStory;$('modalBackdrop').onclick=closeStory;$('knowledgeBtn').onclick=openKnowledgeGap;$('tickerBtn').onclick=()=>{const id=$('tickerBtn').dataset.event;if(id)openStory(id)};$('loadMore').onclick=()=>{state.depth=Math.min(120,state.depth+10);persistUi();renderFeed()};$('clearSearch').onclick=clearSearch;$('search').addEventListener('compositionstart',()=>state.composing=true);$('search').addEventListener('compositionend',e=>{state.composing=false;runSuggest(e.target.value);runSearch(e.target.value)});$('search').addEventListener('input',e=>{if(state.composing)return;const raw=String(e.currentTarget.value??'');runSuggest(raw);clearTimeout(state.searchTimer);state.searchTimer=setTimeout(()=>{if($('search').value===raw)runSearch(raw)},220)});$('search').addEventListener('focus',()=>{if($('search').value.trim())runSuggest($('search').value)});$('search').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();hideSuggestions();runSearch(e.target.value)}if(e.key==='Escape')hideSuggestions()});document.addEventListener('click',e=>{if(!$('searchShell').contains(e.target))hideSuggestions()});document.addEventListener('keydown',e=>{if(e.key==='/'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){e.preventDefault();$('search').focus()}if(e.key==='Escape'){if($('storyModal').classList.contains('open'))closeStory();else if($('categoriesDrawer')?.classList.contains('open'))toggleCategories(false);else if($('followUpModal')?.classList.contains('open'))toggleFollowUp(false);else if($('replayModal').classList.contains('open'))toggleReplay(false);else if($('radarDrawer').classList.contains('open'))toggleRadar(false);else if($('inboxDrawer').classList.contains('open'))toggleInbox(false);else if($('systemDrawer').classList.contains('open'))toggleDrawer(false)}});$('theme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light';localStorage.setItem('aetheria-theme',document.documentElement.dataset.theme)};document.querySelectorAll('#depthSwitch button').forEach(b=>b.onclick=()=>{state.depth=num(b.dataset.depth);document.querySelectorAll('#depthSwitch button').forEach(x=>x.classList.toggle('active',x===b));persistUi();renderFeed()});$('stackPrev').onclick=()=>moveStack(-1);$('stackNext').onclick=()=>moveStack(1);$('storyStack').addEventListener('pointerdown',e=>{const x=e.clientX;const up=ev=>{const dx=ev.clientX-x;if(Math.abs(dx)>35)moveStack(dx<0?1:-1);document.removeEventListener('pointerup',up)};document.addEventListener('pointerup',up)});$('radarBtn').onclick=()=>toggleRadar(true);$('radarBackdrop').onclick=()=>toggleRadar(false);$('radarClose').onclick=()=>toggleRadar(false);$('radarAddBtn').onclick=addRadar;$('radarInput').addEventListener('keydown',e=>{if(e.key==='Enter')addRadar()});$('inboxBtn').onclick=()=>toggleInbox(true);$('inboxBackdrop').onclick=()=>toggleInbox(false);$('inboxClose').onclick=()=>toggleInbox(false);$('clearInbox').onclick=clearInbox;$('replayBtn').onclick=()=>{toggleReplay(true);if(!$('replayDate').value)$('replayDate').value=todayIndia();runReplay()};$('replayBackdrop').onclick=()=>toggleReplay(false);$('replayClose').onclick=()=>toggleReplay(false);$('replayRun').onclick=runReplay;
+$('refresh').onclick=()=>{toast('Refreshing the world model…');refresh()};$('systemBtn').onclick=()=>toggleDrawer(true);$('drawerClose').onclick=()=>toggleDrawer(false);$('drawerBackdrop').onclick=()=>toggleDrawer(false);$('modalClose').onclick=closeStory;$('modalBackdrop').onclick=closeStory;$('knowledgeBtn').onclick=openKnowledgeGap;$('tickerBtn').onclick=()=>{const id=$('tickerBtn').dataset.event;if(id)openStory(id)};$('loadMore').onclick=()=>{state.depth=Math.min(120,state.depth+10);persistUi();renderFeed()};$('clearSearch').onclick=clearSearch;$('search').addEventListener('compositionstart',()=>state.composing=true);$('search').addEventListener('compositionend',e=>{state.composing=false;runSuggest(e.target.value);runSearch(e.target.value)});$('search').addEventListener('input',e=>{if(state.composing)return;const raw=String(e.currentTarget.value??'');runSuggest(raw);clearTimeout(state.searchTimer);state.searchTimer=setTimeout(()=>{if($('search').value===raw)runSearch(raw)},220)});$('search').addEventListener('focus',()=>{if($('search').value.trim())runSuggest($('search').value)});$('search').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();hideSuggestions();runSearch(e.target.value)}if(e.key==='Escape')hideSuggestions()});document.addEventListener('click',e=>{if(!$('searchShell').contains(e.target))hideSuggestions()});document.addEventListener('keydown',e=>{if(e.key==='/'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){e.preventDefault();$('search').focus()}if(e.key==='Escape'){if($('storyModal').classList.contains('open'))closeStory();else if($('categoriesDrawer')?.classList.contains('open'))toggleCategories(false);else if($('followUpModal')?.classList.contains('open'))toggleFollowUp(false);else if($('replayModal').classList.contains('open'))toggleReplay(false);else if($('radarDrawer').classList.contains('open'))toggleRadar(false);else if($('inboxDrawer').classList.contains('open'))toggleInbox(false);else if($('systemDrawer').classList.contains('open'))toggleDrawer(false)}});$('theme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light';localStorage.setItem('aetheria-theme',document.documentElement.dataset.theme)};document.querySelectorAll('#depthSwitch button').forEach(b=>b.onclick=()=>{state.depth=num(b.dataset.depth);document.querySelectorAll('#depthSwitch button').forEach(x=>x.classList.toggle('active',x===b));persistUi();renderFeed()});$('stackPrev').onclick=()=>moveStack(-1);$('stackNext').onclick=()=>moveStack(1);$('storyStack').addEventListener('pointerdown',e=>{const x=e.clientX;const up=ev=>{const dx=ev.clientX-x;if(Math.abs(dx)>35)moveStack(dx<0?1:-1);document.removeEventListener('pointerup',up)};document.addEventListener('pointerup',up)});$('radarBtn')?.addEventListener('click',()=>toggleRadar(true));$('radarBackdrop')?.addEventListener('click',()=>toggleRadar(false));$('radarClose')?.addEventListener('click',()=>toggleRadar(false));$('radarAddBtn')?.addEventListener('click',addRadar);$('radarInput')?.addEventListener('keydown',e=>{if(e.key==='Enter')addRadar()});$('inboxBtn')?.addEventListener('click',()=>toggleInbox(true));$('inboxBackdrop')?.addEventListener('click',()=>toggleInbox(false));$('inboxClose')?.addEventListener('click',()=>toggleInbox(false));$('clearInbox')?.addEventListener('click',clearInbox);$('replayBtn')?.addEventListener('click',()=>{toggleReplay(true);if(!$('replayDate').value)$('replayDate').value=todayIndia();runReplay()});$('replayBackdrop')?.addEventListener('click',()=>toggleReplay(false));$('replayClose')?.addEventListener('click',()=>toggleReplay(false));$('replayRun')?.addEventListener('click',runReplay);
 $('categoriesClose')?.addEventListener('click',()=>toggleCategories(false));
 $('categoriesBackdrop')?.addEventListener('click',()=>toggleCategories(false));
 $('categoriesFilter')?.addEventListener('input',e=>renderCategoriesDrawer(e.target.value));

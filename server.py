@@ -590,6 +590,12 @@ def sync_sources():
                 (sid,s["name"],s.get("provider",s["name"]),canonical_url(s["url"]),s.get("topic","World"),s.get("tier","publisher"),s.get("format","rss"),int(s.get("interval_sec",120)),max_items,1,s.get("language","en"),s.get("country","") or ("IN" if s.get("region")=="IN" else ""),s.get("discovered_from",""),s.get("region",""),s.get("city",""),s.get("state_name",s.get("state","")),t,t))
         if ids:
             marks=",".join("?" for _ in ids); con.execute(f"UPDATE sources SET enabled=0 WHERE id NOT IN ({marks})",ids)
+        try:
+            con.execute("""UPDATE events SET topic='Legal'
+                WHERE (lower(title) LIKE '%court%' OR lower(title) LIKE '%bail%' OR lower(title) LIKE '%verdict%' OR lower(title) LIKE '%judiciary%' OR lower(title) LIKE '%supreme court%' OR lower(title) LIKE '%high court%' OR lower(title) LIKE '%tribunal%' OR lower(title) LIKE '%cbi%' OR lower(title) LIKE '%chargesheet%')
+                AND (topic IS NULL OR topic IN ('World','India','Politics','Top'))""")
+        except Exception:
+            pass
         con.commit(); con.close()
 
 
@@ -840,6 +846,8 @@ def fetch_source(source):
 
 
 def _refresh_fts_for_event(con,event_id):
+    if getattr(con, "is_postgres", False):
+        return
     try:
         e=con.execute("SELECT id,title,summary,topic,entities,locations FROM events WHERE id=?",(event_id,)).fetchone()
         if not e: return
@@ -1698,12 +1706,37 @@ def rebuild_snapshot():
     visible_impact_ids={x["id"] for x in impact_objs[:5]}
     discovery_exclude=flash_ids|latest_reserved|visible_important_ids|visible_impact_ids
     sections=build_sections(enriched,exclude_ids=discovery_exclude)
-    all_objs=[x["obj"] for x in enriched[:SNAPSHOT_EVENT_LIMIT]]
+    all_objs=[x["obj"] for x in enriched[:max(SNAPSHOT_EVENT_LIMIT, 350)]]
     cats=category_payload_fast([x["obj"] for x in enriched])
     home=build_home_payload(enriched,ranked_latest,important_objs,impact_objs,future,moving_objs,flash_objs)
+
+    # Ensure category diversity in SNAPSHOT["latest"] so all tabs (Legal, World, Technology, Geopolitics, etc.) have rich stories
+    by_topic = {}
+    for x in ranked_latest:
+        t = x["obj"].get("topic") or "World"
+        by_topic.setdefault(t, []).append(x)
+
+    latest_diverse = []
+    seen_latest_ids = set()
+    for t, items in by_topic.items():
+        for it in items[:30]:
+            if it["obj"]["id"] not in seen_latest_ids:
+                latest_diverse.append(it)
+                seen_latest_ids.add(it["obj"]["id"])
+
+    for it in ranked_latest:
+        if len(latest_diverse) >= 800:
+            break
+        if it["obj"]["id"] not in seen_latest_ids:
+            latest_diverse.append(it)
+            seen_latest_ids.add(it["obj"]["id"])
+
+    latest_diverse.sort(key=lambda x:(x["latest_score"],x["flash_score"]),reverse=True)
+    latest_lane_objs = [x["obj"] for x in latest_diverse]
+
     with SNAPSHOT_LOCK:
         rev=SNAPSHOT.get("revision",0)+1
-        SNAPSHOT={"revision":rev,"built_at":now(),"events":all_objs,"flash":flash_objs,"important":important_objs,"impact":impact_objs,"latest":[x["obj"] for x in ranked_latest[:LATEST_LANE_LIMIT]],"moving":moving_objs,"sections":sections,"categories":cats,"future":future,"market":market_snapshot,"home":home,"state":state}
+        SNAPSHOT={"revision":rev,"built_at":now(),"events":all_objs,"flash":flash_objs,"important":important_objs,"impact":impact_objs,"latest":latest_lane_objs,"moving":moving_objs,"sections":sections,"categories":cats,"future":future,"market":market_snapshot,"home":home,"state":state}
     refresh_event_index()
     FEED_INVALIDATED.clear()
 
@@ -2065,8 +2098,9 @@ def search_events(query,limit=60):
     con=None
     try:
         con=db_read()
+        is_pg = getattr(con, "is_postgres", False)
         rows=[]
-        if terms:
+        if terms and not is_pg:
             try:
                 match=" OR ".join('"'+t.replace('"','')+'"*' for t in terms)
                 rows=con.execute("SELECT e.id FROM event_fts f JOIN events e ON e.id=f.event_id WHERE f MATCH ? AND e.last_seen>? ORDER BY bm25(f) LIMIT 120",(match,cutoff)).fetchall()
@@ -2076,28 +2110,56 @@ def search_events(query,limit=60):
         clauses=[]; params=[cutoff]
         search_needles = [q_lower] + [t for t in terms if t != q_lower]
         for needle in search_needles[:6]:
-            clauses.append("(lower(e.title) LIKE ? OR lower(COALESCE(e.summary,'')) LIKE ? OR lower(COALESCE(e.topic,'')) LIKE ? OR lower(COALESCE(e.entities,'')) LIKE ? OR lower(COALESCE(e.locations,'')) LIKE ? OR lower(COALESCE(a.title,'')) LIKE ? OR lower(COALESCE(a.description,'')) LIKE ? OR lower(COALESCE(a.domain,'')) LIKE ?)")
-            params += [f"%{needle}%"]*8
+            clauses.append("(lower(e.title) LIKE ? OR lower(COALESCE(e.summary,'')) LIKE ? OR lower(COALESCE(e.topic,'')) LIKE ? OR lower(COALESCE(e.entities,'')) LIKE ?)")
+            params += [f"%{needle}%"]*4
 
-        db_rows=con.execute("""SELECT DISTINCT e.id FROM events e
-            LEFT JOIN event_articles ea ON ea.event_id=e.id
-            LEFT JOIN articles a ON a.id=ea.article_id
-            WHERE e.last_seen>? AND ("""+" OR ".join(clauses)+") ORDER BY e.last_seen DESC LIMIT 120",params).fetchall()
+        try:
+            db_rows=con.execute(f"SELECT DISTINCT e.id FROM events e WHERE e.last_seen>? AND ({' OR '.join(clauses)}) ORDER BY e.last_seen DESC LIMIT 120",params).fetchall()
+        except Exception as q_exc:
+            if is_pg:
+                try: con._conn.rollback()
+                except Exception: pass
+            db_rows=[]
+
+        # Also search articles title for deep match
+        if len(db_rows) < 40 and terms:
+            try:
+                art_clauses = []
+                art_params = [cutoff]
+                for needle in search_needles[:4]:
+                    art_clauses.append("lower(a.title) LIKE ?")
+                    art_params.append(f"%{needle}%")
+                art_rows = con.execute(f"SELECT DISTINCT ea.event_id as id FROM articles a JOIN event_articles ea ON ea.article_id=a.id JOIN events e ON e.id=ea.event_id WHERE e.last_seen>? AND ({' OR '.join(art_clauses)}) LIMIT 80", art_params).fetchall()
+                db_rows.extend(art_rows)
+            except Exception:
+                if is_pg:
+                    try: con._conn.rollback()
+                    except Exception: pass
+
         all_ids=list(dict.fromkeys([r["id"] for r in (rows+db_rows)]))
         needed_ids=[x for x in all_ids if x not in results_map][:80]
 
         if needed_ids:
             marks=",".join("?" for _ in needed_ids)
             erows=con.execute(f"SELECT * FROM events WHERE id IN ({marks})",needed_ids).fetchall()
-            meta=con.execute(f"""SELECT ea.event_id,
-              MAX(CASE WHEN a.id=e.primary_article_id THEN a.canonical_url END) primary_url,
-              MAX(CASE WHEN a.id=e.primary_article_id THEN a.domain END) primary_domain,
-              MAX(CASE WHEN a.id=e.primary_article_id THEN a.image_url END) image_url,
-              MAX(CASE WHEN a.id=e.primary_article_id THEN a.published END) published,
-              MAX(CASE WHEN a.id=e.primary_article_id THEN a.description END) description,
-              GROUP_CONCAT(DISTINCT a.domain) domains, GROUP_CONCAT(DISTINCT a.language) languages
-            FROM event_articles ea JOIN articles a ON a.id=ea.article_id JOIN events e ON e.id=ea.event_id WHERE ea.event_id IN ({marks}) GROUP BY ea.event_id, e.id, e.primary_article_id""",needed_ids).fetchall()
-            meta_map={m["event_id"]:m for m in meta}
+            group_fn = "STRING_AGG(DISTINCT a.domain, ',')" if is_pg else "GROUP_CONCAT(DISTINCT a.domain)"
+            lang_fn = "STRING_AGG(DISTINCT a.language, ',')" if is_pg else "GROUP_CONCAT(DISTINCT a.language)"
+            try:
+                meta=con.execute(f"""SELECT ea.event_id,
+                  MAX(CASE WHEN a.id=e.primary_article_id THEN a.canonical_url END) primary_url,
+                  MAX(CASE WHEN a.id=e.primary_article_id THEN a.domain END) primary_domain,
+                  MAX(CASE WHEN a.id=e.primary_article_id THEN a.image_url END) image_url,
+                  MAX(CASE WHEN a.id=e.primary_article_id THEN a.published END) published,
+                  MAX(CASE WHEN a.id=e.primary_article_id THEN a.description END) description,
+                  {group_fn} domains, {lang_fn} languages
+                FROM event_articles ea JOIN articles a ON a.id=ea.article_id JOIN events e ON e.id=ea.event_id WHERE ea.event_id IN ({marks}) GROUP BY ea.event_id, e.id, e.primary_article_id""",needed_ids).fetchall()
+                meta_map={m["event_id"]:m for m in meta}
+            except Exception:
+                if is_pg:
+                    try: con._conn.rollback()
+                    except Exception: pass
+                meta_map={}
+
             for r in erows:
                 o=_serialize_event(dict(r),meta_map)
                 hay=" ".join([

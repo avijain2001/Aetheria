@@ -33,14 +33,13 @@
 <main class="page">
   <section class="front-intro">
     <div><span class="section-kicker">INDIA FIRST · WORLD AWARE</span><h1 id="viewTitle">What matters right now</h1></div>
-    <div class="front-tools">
-      <button class="tool-link" id="radarBtn"><span>RADAR</span><b id="radarCount">0</b></button>
-      <button class="tool-link" id="inboxBtn"><span>INBOX</span><b id="inboxCount">0</b></button>
-      <button class="tool-link" id="replayBtn"><span>REPLAY</span></button>
-    </div>
   </section>
 
   <section id="homeView" class="home-view">
+    <!-- Dedicated Full Markets Desk (Visible only when Markets tab is active) -->
+    <section class="market-desk-zone" id="marketDeskZone" hidden>
+      <div class="market-desk-container" id="marketDeskContainer"></div>
+    </section>
     <section class="lead-zone">
       <div class="zone-label"><span>01</span><b>TOP NEWS</b><i></i><em>WHAT MATTERS NOW</em></div>
       <div class="lead-layout">
@@ -97,36 +96,27 @@
 
     <section class="desk-zone"><div class="zone-label"><span>05</span><b>DESKS</b><i></i><em>GO DEEPER</em></div><div id="deskGrid" class="desk-grid"></div></section>
 
-    <!-- Contextual In-Feed Disclaimer Notice -->
-    <div class="product-disclaimer-notice">
-      <p><strong>Aetheria</strong> aggregates and analyses information from third-party sources. Information and AI-generated outputs may contain errors and are not independently guaranteed by Aetheria. Verify important information with the original source before relying upon it. Any action taken is solely the user's responsibility. <a href="/disclaimer" class="legal-link">See full Disclaimer ↗</a></p>
-    </div>
-
-    <!-- Permanent Legal Footer -->
+    <!-- Sleek Compact Legal Footer -->
     <footer class="app-legal-footer" id="appLegalFooter">
-      <div class="legal-footer-brand">
-        <div class="brand-line">
-          <span class="brand-title">AETHERIA</span>
-          <span class="brand-motto">Know what matters. before you go looking.</span>
+      <div class="legal-footer-compact">
+        <div class="legal-brand-mini">
+          <span class="brand-name">AETHERIA</span>
+          <span class="brand-tag">Testing Phase · V24</span>
         </div>
-        <div class="legal-links-row">
+        <div class="legal-links-compact">
           <a href="/disclaimer" class="legal-link">Disclaimer</a>
           <span class="sep">·</span>
-          <a href="/disclaimer#terms" class="legal-link">Terms of Use</a>
+          <a href="/disclaimer#terms" class="legal-link">Terms</a>
           <span class="sep">·</span>
-          <a href="/disclaimer#privacy" class="legal-link">Privacy Policy</a>
+          <a href="/disclaimer#privacy" class="legal-link">Privacy</a>
           <span class="sep">·</span>
           <a href="/disclaimer#copyright" class="legal-link">Copyright / IP</a>
           <span class="sep">·</span>
           <a href="mailto:contact@aetheria.intelligence" class="legal-link">Contact</a>
         </div>
-        <div class="legal-copyright-row">
-          <span>© 2026 Avinash Jain. All rights reserved.</span>
-          <span>Developed by Avinash Jain.</span>
+        <div class="legal-copy-compact">
+          <span>Developed by Avinash Jain · © 2026 All Rights Reserved</span>
         </div>
-        <p class="legal-disclaimer-compact">
-          Aetheria aggregates, analyses and presents information from third-party and other sources. Aetheria and its developer do not independently guarantee the accuracy, authenticity, completeness or timeliness of every source or item of information. AI-generated and algorithmic outputs may contain errors. Information is provided for general informational purposes only and is not professional, financial, investment, legal, medical or other advice. Any reliance upon or action taken based on information available through Aetheria is solely the responsibility of the user. Verify important information with the original source before relying upon it. Third-party content remains the property of its respective owners.
-        </p>
       </div>
     </footer>
   </section>
