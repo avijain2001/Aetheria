@@ -2583,9 +2583,14 @@ class Handler(BaseHTTPRequestHandler):
             eid=path.rsplit("/",1)[-1]; d=event_detail(eid)
             if not d: self.send_json(404,{"ok":False},send_body=send_body); return
             self.send_json(200,{"ok":True,**d},send_body=send_body); return
-        safe=path.lstrip("/") or "index.html"; target=(WEB_DIR/safe).resolve()
-        if not str(target).startswith(str(WEB_DIR.resolve())) or not target.is_file(): target=WEB_DIR/"index.html"
-        ct={".html":"text/html; charset=utf-8",".css":"text/css; charset=utf-8",".js":"application/javascript; charset=utf-8",".json":"application/json; charset=utf-8",".webmanifest":"application/manifest+json"}.get(target.suffix,"application/octet-stream")
+        if path in ("/disclaimer", "/terms", "/privacy", "/copyright", "/disclaimer.html"):
+            target = WEB_DIR / "disclaimer.html"
+        else:
+            safe = path.lstrip("/") or "index.html"
+            target = (WEB_DIR / safe).resolve()
+            if not str(target).startswith(str(WEB_DIR.resolve())) or not target.is_file():
+                target = WEB_DIR / "index.html"
+        ct = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".json": "application/json; charset=utf-8", ".webmanifest": "application/manifest+json"}.get(target.suffix, "application/octet-stream")
         data=target.read_bytes(); self.send_response(200); self.send_header("Content-Type",ct); self.send_header("Cache-Control","no-store"); self.send_header("Content-Length",str(len(data))); self.end_headers()
         if send_body:
             self.wfile.write(data)

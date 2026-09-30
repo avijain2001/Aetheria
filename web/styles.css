@@ -1617,4 +1617,116 @@ body{font:14.5px/1.5 'Inter',ui-sans-serif,system-ui,-apple-system,BlinkMacSyste
   box-shadow:0 0 8px #ef4444;
 }
 
+/* ==================== PRODUCT LEGAL & DISCLAIMER SYSTEM ==================== */
+.product-disclaimer-notice {
+  margin: 32px 0 20px;
+  padding: 14px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.product-disclaimer-notice strong {
+  color: var(--text);
+}
+.product-disclaimer-notice .legal-link,
+.app-legal-footer .legal-link {
+  color: var(--cyan);
+  text-decoration: none;
+  font-weight: 600;
+  transition: opacity .15s ease;
+}
+.product-disclaimer-notice .legal-link:hover,
+.app-legal-footer .legal-link:hover {
+  text-decoration: underline;
+  opacity: .85;
+}
+
+.app-legal-footer {
+  margin-top: 24px;
+  padding: 32px 16px 90px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+.legal-footer-brand {
+  max-width: 780px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.legal-footer-brand .brand-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.legal-footer-brand .brand-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  color: var(--text);
+}
+.legal-footer-brand .brand-motto {
+  font-size: 12px;
+  color: var(--muted);
+}
+.legal-links-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.legal-links-row .sep {
+  opacity: .5;
+}
+.legal-copyright-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--muted);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.legal-disclaimer-compact {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+  opacity: .78;
+  max-width: 680px;
+  margin: 6px 0 0;
+  text-align: center;
+}
+
+.modal-ai-disclaimer {
+  padding: 10px 14px;
+  margin: 10px 0 16px;
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.modal-ai-disclaimer b {
+  color: var(--text);
+}
+.modal-ai-disclaimer a {
+  color: var(--cyan);
+  text-decoration: none;
+  font-weight: 600;
+  margin-left: 4px;
+}
+.modal-ai-disclaimer a:hover {
+  text-decoration: underline;
+}
+
 
