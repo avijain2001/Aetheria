@@ -1844,31 +1844,30 @@ def build_home_payload(enriched, ranked_latest, important_objs, impact_objs, fut
     used=set()
     flash_ids={o["id"] for o in flash_objs}
     def _stack_score(x):
-        """Recency-first score for the Story Stack based on actual article publication date.
-        Stories from the last 8h get a strong time-decay boost; older stories
-        are progressively discounted so stale content cannot block fresh breaking news."""
+        """Strict publication recency & India-first score for the Story Stack.
+        Guarantees that genuinely recent stories (especially India/local & high velocity)
+        surface at the top of the Stack, preventing old 2d stories from hogging lead cards."""
         o=x["obj"]
         pub_time=float(o.get("published") or o.get("last_seen") or now_ts)
         age_h=max(0.0,(now_ts-pub_time)/3600.0)
-        # Exponential recency multiplier: 8h → 1.0, 24h → 0.50, 48h → 0.20, 72h → 0.08
-        if age_h<=8.0:
+        # Steep recency multiplier: <4h → 1.0, 12h → 0.40, 24h → 0.15, >24h → 0.02
+        if age_h<=4.0:
             recency=1.0
+        elif age_h<=12.0:
+            recency=1.0-0.60*(age_h-4.0)/8.0     # 1.0 → 0.40
         elif age_h<=24.0:
-            recency=1.0-0.50*(age_h-8.0)/16.0   # 1.0 → 0.50
-        elif age_h<=48.0:
-            recency=0.50-0.30*(age_h-24.0)/24.0  # 0.50 → 0.20
+            recency=0.40-0.25*(age_h-12.0)/12.0  # 0.40 → 0.15
         else:
-            recency=max(0.05,0.20-0.15*(age_h-48.0)/24.0)  # 0.20 → 0.05
-        freshness=max(0.0,1.0-age_h/36.0)
-        sig=float((o.get("signals") or {}).get("global") or 0)
+            recency=max(0.01,0.15-0.14*(age_h-24.0)/48.0) # >24h heavily penalized
+        freshness=max(0.0,1.0-age_h/24.0)
         india=float(o.get("india_lens_score") or 0)
+        local=float(o.get("local_relevance") or 0)
         velocity=float(o.get("velocity") or 0)
-        editorial=float(x.get("editorial_score",0))
-        # Blend: 55% recency-freshness, 20% editorial quality, 15% india, 10% velocity
-        return recency*(freshness*0.55 + editorial*0.20 + india*0.15 + velocity*0.10)
+        # Blend: 80% recency/freshness, 15% India & local relevance boost, 5% velocity
+        return recency * (freshness * 0.70 + (india * 0.70 + local * 0.30) * 0.20 + velocity * 0.10)
 
-    # Stack candidates: prefer events published in the last 36h; fall back to all if fewer than 4
-    fresh_editorial=[x for x in enriched if x["obj"]["id"] not in flash_ids and max(0.0,(now_ts-float(x["obj"].get("published") or x["obj"].get("last_seen") or now_ts))/3600.0)<=36.0]
+    # Stack candidates: prefer events published in the last 24h; fall back to all if fewer than 4
+    fresh_editorial=[x for x in enriched if x["obj"]["id"] not in flash_ids and max(0.0,(now_ts-float(x["obj"].get("published") or x["obj"].get("last_seen") or now_ts))/3600.0)<=24.0]
     editorial_candidates=fresh_editorial if len(fresh_editorial)>=4 else [x for x in enriched if x["obj"]["id"] not in flash_ids]
     editorial_pool=sorted(editorial_candidates, key=_stack_score, reverse=True)
     stack=[x["obj"] for x in editorial_pool[:10]]
