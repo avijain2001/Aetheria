@@ -112,12 +112,29 @@ function isFresh(e){const t=num(e?.last_seen||e?.published);if(!t)return true;re
 function topicFilter(e){if(!isFresh(e))return false;return state.topic==='Top'||state.topic==='All'||e.topic===state.topic}
 function trustChip(e){const s=String(e?.status||'DEVELOPING').toUpperCase();const label=s==='CONFIRMED'?'CORROBORATED':s;return`<span class="truth truth-${s.toLowerCase()}">${esc(label)}</span>`}
 function stackItems(){let items=(state.home?.stack||[]).filter(topicFilter);if(!items.length)items=(state.latest||[]).filter(topicFilter).slice(0,10);return items.slice(0,10)}
+function impactLabel(v){const p=pct(v);if(p>=70)return'HIGH';if(p>=40)return'ELEVATED';if(p>=20)return'MODERATE';return'LOW'}
+function evidenceLabel(v){const p=pct(v);if(p>=75)return'Strong';if(p>=50)return'Moderate';if(p>=30)return'Mixed';return'Low'}
 function stackCard(e,pos,originalIndex){
-  const sig=pct(e?.intelligence?.impact),conf=pct(e?.intelligence?.confidence);
+  const conf=pct(e?.intelligence?.confidence),impact=pct(e?.intelligence?.impact);
   const active=pos===0;
   const layer=Math.min(pos,9);
   const isDisputed = e?.status === 'DISPUTED' || (e?.conflicts||[]).length > 0;
-  return`<article class="stack-card ${active?'active':''}" data-stack="${originalIndex}" style="--pos:${layer};--z:${100-layer};--opacity:${active?1:Math.max(.24,1-layer*.08)}"><div class="stack-copy"><div class="stack-kicker"><span class="status-dot"></span>${trustChip(e)}<em>${esc(e.topic||'WORLD')}</em><time>${age(e.last_seen||e.published)}</time></div><h2>${articleAnchor(e)}</h2>${e.description?`<p class="lead-summary">${esc(e.description)}</p>`:''}<div class="stack-evidence"><span>${num(e.sources)||1} linked report${num(e.sources)===1?'':'s'}</span><span>${num(e.source_tiers?.official)||0} official</span><span>${conf}% confidence</span><span>${sig}% impact</span>${(e.languages||[]).length?`<span>${(e.languages||[]).slice(0,2).map(esc).join(' · ')}</span>`:''}</div><div class="stack-ai"><b>${isDisputed?'⚡ CONTEXT & DISPUTE':(e.india_lens_reasons?.length?'INDIA LENS':'AETHERIA READ')}</b><span>${esc(isDisputed?'Source disagreements or contradictory claims noted across reporting set.':(e.life_impact||e.why_matters||e.india_lens_reasons||[]).slice(0,2).join(' · ')||'Observed story activity across the source set.')}</span></div><div class="lead-actions">${validUrl(e?.url)?`<a class="read-btn" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">Read original ↗</a>`:`<span class="read-btn disabled">Original unavailable</span>`}<span class="source-chip">${esc(sourceLine(e))}</span></div></div>${imageBlock(e,'stack-media',active?'eager':'lazy')} </article>`;
+  const srcCount=num(e.sources)||1;
+  const offCount=num(e.source_tiers?.official)||0;
+  const whyParts=(e.why_matters||e.india_lens_reasons||e.life_impact||[]).slice(0,2).filter(Boolean);
+  const whyText=whyParts.join(' · ')||'';
+  const evidenceLine=[
+    `${srcCount} report${srcCount===1?'':'s'}`,
+    offCount?`${offCount} official`:'',
+    `${evidenceLabel(e?.intelligence?.confidence)} evidence`,
+    e.status?String(e.status).charAt(0)+String(e.status).slice(1).toLowerCase():''
+  ].filter(Boolean).join(' · ');
+  const impLine=impact>=20?`Impact: ${impactLabel(e?.intelligence?.impact)}`:''
+  const contextLabel=isDisputed?'CONTEXT & DISPUTE':(e.india_lens_reasons?.length?'INDIA LENS':'AETHERIA READ');
+  const contextText=isDisputed
+    ?'Source reports contain conflicting claims. Read with caution.'
+    :(e.life_impact||e.why_matters||e.india_lens_reasons||[]).slice(0,2).join(' · ')||'Observed story activity across the source set.';
+  return`<article class="stack-card ${active?'active':''}" data-stack="${originalIndex}" style="--pos:${layer};--z:${100-layer};--opacity:${active?1:Math.max(.24,1-layer*.08)}"><div class="stack-copy"><div class="stack-kicker"><span class="status-dot"></span>${trustChip(e)}<em>${esc(e.topic||'WORLD')}</em><time>${age(e.last_seen||e.published)}</time></div><h2>${articleAnchor(e)}</h2>${e.description?`<p class="lead-summary">${esc(e.description)}</p>`:''}<p class="stack-evidence-text">${esc(evidenceLine)}${impLine?` · ${impLine}`:''}</p>${whyText?`<div class="stack-why"><span>Why it matters</span><span>${esc(whyText)}</span></div>`:''}<div class="stack-ai"><b>${contextLabel}</b><span>${esc(contextText)}</span></div><div class="lead-actions">${validUrl(e?.url)?`<a class="read-btn" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">Read original ↗</a>`:`<span class="read-btn disabled">Original unavailable</span>`}<span class="source-chip">${esc(sourceLine(e))}${srcCount>1?` · ${srcCount} sources`:''}</span></div></div>${imageBlock(e,'stack-media',active?'eager':'lazy')} </article>`;
 }
 function formatMarket(v,symbol){const n=num(v);if(!n)return'—';if(['USD/INR','EUR/INR','GBP/INR','AED/INR'].includes(String(symbol||'')))return n.toFixed(2);if(String(symbol||'').startsWith('JPY/INR'))return n.toFixed(4);return n.toLocaleString(undefined,{maximumFractionDigits:2})}
 function renderMarket(){
@@ -299,7 +316,16 @@ function renderImpact(items){
   if(t)t.textContent=isTop?'IMPACT':`${state.topic.toUpperCase()} TRANSMISSION`;
   let a=(items||[]).filter(topicFilter).slice(0,6);
   if(!a.length&&!isTop)a=(state.latest||[]).filter(e=>topicFilter(e)&&num(e.intelligence?.impact)>=.35).slice(0,6);
-  $('impactList').innerHTML=a.map(e=>{const s=e.signals||{},c=[];if(num(s.india)>=.45)c.push('India');if(num(s.financial)>=.45)c.push('Markets');if(num(s.supply_chain)>=.45)c.push('Trade');if(num(s.geopolitical)>=.45)c.push('Geopolitics');return`<article class="impact-story" data-event="${esc(e.id)}"><div class="impact-number">${pct(e.intelligence?.impact)}</div><div><h3>${articleAnchor(e)}</h3><p>${esc(c.join(' · ')||e.topic||'Global')} · ${age(e.last_seen||e.published)}</p><small class="mini-read"><b>Aetheria Read</b> ${esc(analysisHint(e))}</small></div>${originalLink(e)}</article>`}).join('')||'<div class="empty-state">No strong transmission signal detected yet.</div>';wireStoryRows('impactList')}
+  $('impactList').innerHTML=a.map(e=>{
+    const s=e.signals||{},c=[];
+    if(num(s.india)>=.45)c.push('India');
+    if(num(s.financial)>=.45)c.push('Markets');
+    if(num(s.supply_chain)>=.45)c.push('Trade');
+    if(num(s.geopolitical)>=.45)c.push('Geopolitics');
+    const il=impactLabel(e.intelligence?.impact);
+    const ilClass=il==='HIGH'?'impact-high':il==='ELEVATED'?'impact-elevated':'impact-moderate';
+    return`<article class="impact-story" data-event="${esc(e.id)}"><div class="impact-level ${ilClass}">${il}</div><div><h3>${articleAnchor(e)}</h3><p>${esc(c.join(' · ')||e.topic||'Global')} · ${age(e.last_seen||e.published)}</p><small class="mini-read"><b>Aetheria Read</b> ${esc(analysisHint(e))}</small></div>${originalLink(e)}</article>`
+  }).join('')||'<div class="empty-state">No strong transmission signal detected yet.</div>';wireStoryRows('impactList')}
 function renderAiPulse(){const h=state.home||{},m=h.metrics||{},pressure=h.pressure||[];const languages=new Set((state.events||[]).flatMap(e=>e.languages||[]));$('aiModeLabel').textContent='LOCAL · EVIDENCE-GROUNDED';$('aiPulse').innerHTML=`<div class="ai-rail-metrics"><div><b>${num(m.events_24h).toLocaleString()}</b><span>living events</span></div><div><b>${num(m.reports_24h).toLocaleString()}</b><span>linked reports</span></div><div><b>${languages.size||0}</b><span>languages</span></div><div><b>${num(m.disputed)}</b><span>disputed</span></div></div><div class="ai-rail-read"><strong>${num(m.disputed)?`${num(m.disputed)} story${num(m.disputed)===1?'':'ies'} with conflicting reports`:num(m.flash)?`${num(m.flash)} flash development${num(m.flash)===1?'':'s'} are being isolated from the main flow`:'Aetheria is comparing source activity before surfacing the next update.'}</strong><span>${num(m.events_24h).toLocaleString()} living events · ${num(m.reports_24h).toLocaleString()} linked reports · ${languages.size||0} languages · evidence-first local analysis</span></div>`;$('pressureList').innerHTML=pressure.map(x=>`<div class="pressure-item"><span>${esc(x.label)}</span><i><b style="width:${pct(x.score)}%"></b></i><em>${pct(x.score)}</em></div>`).join('')||'<span class="pressure-empty">No measurable pressure signal yet.</span>'}
 function row(e){
   const hasImg=validUrl(e?.image_url);
