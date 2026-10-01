@@ -268,6 +268,11 @@ def init_db():
         ensure_column(con,"ai_context","why","TEXT")
         ensure_column(con,"ai_context","uncertainty","TEXT")
         ensure_column(con,"ai_context","evidence_note","TEXT")
+        # latest_article_id tracks the most recently ingested article per event (by pub time)
+        # This is separate from primary_article_id (original founding article) and is used
+        # to display the freshest headline/URL in the Latest tab.
+        ensure_column(con,"events","latest_article_id","TEXT")
+        ensure_column(con,"events","latest_article_pub","REAL DEFAULT 0")
         try:
             con.execute("CREATE VIRTUAL TABLE IF NOT EXISTS event_fts USING fts5(event_id UNINDEXED,title,summary,topic,entities,locations,domains,article_titles)")
         except Exception:
@@ -1173,7 +1178,13 @@ def ingest(items):
             cands=_candidate_events_from_index(a,local_index,df,n,local_postings,local_entity_postings,local_by_id)
             article_terms=content_tokens(a["title"]+" "+a.get("description", ""))
             pub_ts = a.get("published")
-            art_seen = pub_ts if (pub_ts and pub_ts > t - 7 * 86400) else t
+            # CRITICAL FIX: last_seen must represent WHEN WE FETCHED this information,
+            # not when the article was originally published. Using pub_ts for last_seen
+            # caused old re-fetched articles to inflate event freshness. t is the
+            # current ingest time — this is the real "we observed new info" timestamp.
+            # We still use pub_ts for first_seen (when the event started) and for
+            # sorting within the latest lane (article_pub in meta).
+            art_seen = t  # always use current ingest time for last_seen
             if cands:
                 event_id=cands[0][1]; change="UPDATE"
                 # Let the in-batch event representation evolve so subsequent
@@ -1205,7 +1216,10 @@ def ingest(items):
             if not con.execute("SELECT 1 FROM event_articles WHERE event_id=? AND article_id=?",(event_id,aid)).fetchone():
                 con.execute("INSERT INTO event_articles(event_id,article_id,first_linked) VALUES(?,?,?)",(event_id,aid,t))
                 con.execute("INSERT INTO event_updates(event_id,article_id,observed_at,change_type,note) VALUES(?,?,?,?,?)",(event_id,aid,t,change,a["title"][:240]))
-                con.execute("UPDATE events SET last_seen=MAX(last_seen, ?),last_change=?,primary_article_id=COALESCE(primary_article_id,?) WHERE id=?",(art_seen,t,aid,event_id))
+                # Update last_seen to current time (we just got fresh info), primary_article_id is the founding article.
+                # Also update latest_article_id if this article's pub_ts is newer than the stored one.
+                con.execute("UPDATE events SET last_seen=MAX(last_seen, ?),last_change=?,primary_article_id=COALESCE(primary_article_id,?),latest_article_id=CASE WHEN COALESCE(latest_article_pub,0)<? THEN ? ELSE latest_article_id END,latest_article_pub=CASE WHEN COALESCE(latest_article_pub,0)<? THEN ? ELSE latest_article_pub END WHERE id=?",
+                    (art_seen,t,aid,pub_ts or 0,aid,pub_ts or 0,pub_ts or 0,event_id))
             affected.add(event_id)
         for eid in affected: _recalc_event_con(con,eid,t)
         con.execute("INSERT OR REPLACE INTO system_metrics(key,value,updated_at) VALUES('last_ingest',?,?)",(str(t),t))
@@ -1292,7 +1306,11 @@ def _serialize_event(e,meta_map,score_override=None):
     languages=[d for d in str(mlanguages or "").split(",") if d]
     mcountries = m["countries"] if m is not None and "countries" in m.keys() else ""
     countries=[d for d in str(mcountries or "").split(",") if d]
+    # published: use the most recently published article's timestamp
+    # (MAX published across all linked articles, already computed in meta_map)
     pub=float(m["published"]) if m and m["published"] else None
+    # latest_published: the timestamp of the latest_article_id specifically
+    latest_pub=float(m["latest_published"]) if m and m.get("latest_published") else pub
     signals={"global":round(float(e["significance"] or 0),2),"india":round(float(e["india_relevance"] or 0),2),"financial":round(float(e["financial_relevance"] or 0),2),"supply_chain":round(float(e["supply_chain_relevance"] or 0),2),"geopolitical":round(float(e["geopolitical_relevance"] or 0),2),"social":round(float(e["social_relevance"] or 0),2)}
     confidence=min(.99,max(.05,.38*float(e["corroboration"] or 0)+.30*float(e["authority"] or 0)+.17*float(e["velocity"] or 0)+.15*float(e["significance"] or 0)))
     impact=min(.99,max(.05,.45*float(e["significance"] or 0)+.18*float(e["urgency"] or 0)+.12*float(e["financial_relevance"] or 0)+.12*float(e["geopolitical_relevance"] or 0)+.13*float(e["supply_chain_relevance"] or 0)))
@@ -1315,7 +1333,28 @@ def _serialize_event(e,meta_map,score_override=None):
     local_rel=build_local_relevance(e["title"], e.get("topic"), AETHERIA_CITY, AETHERIA_STATE)
     life_path=build_personal_relevance(e, signals)
     if local_rel>0 and "Local" not in life_path: life_path=["Local / city impact"]+life_path
-    obj={"id":e["id"],"title":e["title"],"topic":e["topic"],"status":e["status"],"last_seen":e["last_seen"],"published":pub,"published_utc":datetime.fromtimestamp(pub,timezone.utc).isoformat() if pub else None,"score":round(float(score_override if score_override is not None else e["significance"])*100,1),"sources":e["source_count"],"source_tiers":{"official":e["official_count"],"publisher":e["publisher_count"],"discovery":e["discovery_count"]},"source_domains":domains[:6],"languages":languages[:8],"source_countries":countries[:8],"article_count":int(e["article_count"] or 0),"url":safe_url(m["primary_url"] if m else ""),"domain":m["primary_domain"] if m else "","image_url":safe_url(m["image_url"] if m else ""),"description":(e["summary"] or (m["description"] if m and m["description"] else ""))[:PRIMARY_DESCRIPTION_LIMIT],"velocity":round(float(e["velocity"] or 0),2),"signals":signals,"india_lens_score":round(min(1.0,max(0.0,.55*signals["india"]+.18*signals["financial"]+.15*signals["supply_chain"]+.08*signals["geopolitical"]+.04*signals["global"])),3),"india_lens_reasons":[x for x in ([(("India" if signals["india"]>=.45 else None)),("Markets" if signals["financial"]>=.45 else None),("Trade / supply" if signals["supply_chain"]>=.45 else None),("Geopolitics" if signals["geopolitical"]>=.45 else None)] ) if x][:3],"intelligence":{"confidence":round(confidence,2),"impact":round(impact,2),"source_strength":round(source_strength,2)},"reason":e["last_reason"] or "","why_matters":why[:3],"affected_domains":affected[:4],"personal_relevance":life_path,"life_impact":life_path[:4],"decision_relevance":life_path[:4],"primary_article_id":e["primary_article_id"],"local_relevance":round(local_rel,3)}
+    # URL: use the latest article's URL as the primary click-through for recency.
+    # Falls back to primary_article (founding article) if latest is not available.
+    display_url = safe_url(m["latest_url"] if m else "") or safe_url(m["primary_url"] if m else "")
+    display_domain = (m["latest_domain"] if m else "") or (m["primary_domain"] if m else "")
+    display_image = safe_url(m.get("latest_image_url") if m else "") or safe_url(m.get("image_url") if m else "")
+    obj={"id":e["id"],"title":e["title"],"topic":e["topic"],"status":e["status"],"last_seen":e["last_seen"],
+         "published":pub,"published_utc":datetime.fromtimestamp(pub,timezone.utc).isoformat() if pub else None,
+         "latest_published":latest_pub,"latest_published_utc":datetime.fromtimestamp(latest_pub,timezone.utc).isoformat() if latest_pub else None,
+         "score":round(float(score_override if score_override is not None else e["significance"])*100,1),
+         "sources":e["source_count"],"source_tiers":{"official":e["official_count"],"publisher":e["publisher_count"],"discovery":e["discovery_count"]},
+         "source_domains":domains[:6],"languages":languages[:8],"source_countries":countries[:8],
+         "article_count":int(e["article_count"] or 0),
+         "url":display_url,"domain":display_domain,"image_url":display_image,
+         "latest_url":safe_url(m["latest_url"] if m else ""),"latest_domain":(m["latest_domain"] if m else ""),
+         "description":(e["summary"] or (m["description"] if m and m["description"] else ""))[:PRIMARY_DESCRIPTION_LIMIT],
+         "velocity":round(float(e["velocity"] or 0),2),"signals":signals,
+         "india_lens_score":round(min(1.0,max(0.0,.55*signals["india"]+.18*signals["financial"]+.15*signals["supply_chain"]+.08*signals["geopolitical"]+.04*signals["global"])),3),
+         "india_lens_reasons":[x for x in ([(("India" if signals["india"]>=.45 else None)),("Markets" if signals["financial"]>=.45 else None),("Trade / supply" if signals["supply_chain"]>=.45 else None),("Geopolitics" if signals["geopolitical"]>=.45 else None)]) if x][:3],
+         "intelligence":{"confidence":round(confidence,2),"impact":round(impact,2),"source_strength":round(source_strength,2)},
+         "reason":e["last_reason"] or "","why_matters":why[:3],"affected_domains":affected[:4],
+         "personal_relevance":life_path,"life_impact":life_path[:4],"decision_relevance":life_path[:4],
+         "primary_article_id":e["primary_article_id"],"local_relevance":round(local_rel,3)}
     return obj
 
 
@@ -1337,22 +1376,27 @@ def build_enriched():
             chunk_ids=ids[i:i+chunk_size]
             marks=",".join("?" for _ in chunk_ids)
             try:
+                # FIXED: Use correlated subquery to get data from the article with MAX published.
+                # Previously MAX(a.canonical_url) gave a lexicographically-highest URL, not the
+                # URL of the most-recently-published article. Now we use latest_article_id from
+                # the events table (set during ingest) and a correlated subquery fallback.
                 chunk_meta=con.execute(f"""SELECT ea.event_id,
                     MAX(CASE WHEN a.id=e.primary_article_id THEN a.canonical_url END) primary_url,
                     MAX(CASE WHEN a.id=e.primary_article_id THEN a.domain END) primary_domain,
                     MAX(CASE WHEN a.id=e.primary_article_id THEN a.image_url END) primary_image_url,
                     MAX(CASE WHEN a.id=e.primary_article_id THEN a.published END) primary_published,
                     MAX(CASE WHEN a.id=e.primary_article_id THEN a.description END) primary_description,
+                    MAX(CASE WHEN a.id=e.latest_article_id THEN a.canonical_url END) latest_url,
+                    MAX(CASE WHEN a.id=e.latest_article_id THEN a.domain END) latest_domain,
+                    MAX(CASE WHEN a.id=e.latest_article_id THEN a.image_url END) latest_image_url,
+                    MAX(CASE WHEN a.id=e.latest_article_id THEN a.description END) latest_description,
+                    MAX(CASE WHEN a.id=e.latest_article_id THEN a.published END) latest_published,
                     MAX(a.published) published,
-                    MAX(a.canonical_url) latest_url,
-                    MAX(a.domain) latest_domain,
-                    MAX(a.image_url) latest_image_url,
-                    MAX(a.description) latest_description,
                     GROUP_CONCAT(DISTINCT a.domain) domains,
                     GROUP_CONCAT(DISTINCT a.language) languages,
                     GROUP_CONCAT(DISTINCT a.country) countries
                   FROM event_articles ea JOIN articles a ON a.id=ea.article_id JOIN events e ON e.id=ea.event_id
-                  WHERE ea.event_id IN ({marks}) GROUP BY ea.event_id, e.id, e.primary_article_id""",chunk_ids).fetchall()
+                  WHERE ea.event_id IN ({marks}) GROUP BY ea.event_id, e.id, e.primary_article_id, e.latest_article_id""",chunk_ids).fetchall()
                 meta.extend(chunk_meta)
             except Exception as meta_exc:
                 print(f"[Aetheria build_enriched meta warning] {type(meta_exc).__name__}: {str(meta_exc)[:180]}", flush=True)
@@ -1369,6 +1413,14 @@ def build_enriched():
     meta_map={}
     for m in meta:
         m_dict = dict(m)
+        # latest_url/domain/image: prefer the explicit latest_article_id match;
+        # fall back to primary if latest_article_id is the same or null.
+        m_dict["latest_url"] = m_dict.get("latest_url") or m_dict.get("primary_url") or ""
+        m_dict["latest_domain"] = m_dict.get("latest_domain") or m_dict.get("primary_domain") or ""
+        m_dict["latest_image_url"] = m_dict.get("latest_image_url") or m_dict.get("primary_image_url") or ""
+        m_dict["latest_description"] = m_dict.get("latest_description") or m_dict.get("primary_description") or ""
+        m_dict["latest_published"] = m_dict.get("latest_published") or m_dict.get("published") or None
+        # primary_url is the canonical event link (founding article). Use it as fallback everywhere.
         m_dict["primary_url"] = m_dict.get("primary_url") or m_dict.get("latest_url") or ""
         m_dict["primary_domain"] = m_dict.get("primary_domain") or m_dict.get("latest_domain") or ""
         m_dict["image_url"] = m_dict.get("primary_image_url") or m_dict.get("latest_image_url") or ""
@@ -1387,9 +1439,15 @@ def build_enriched():
         if lr and lr[1]>=8:
             base*=max(.92,min(1.10,1+(lr[0]-.20)*.20))
         impact=.45*float(e["significance"] or 0)+.18*float(e["urgency"] or 0)+.12*float(e["financial_relevance"] or 0)+.12*float(e["geopolitical_relevance"] or 0)+.13*float(e["supply_chain_relevance"] or 0)
-        published_raw=float(meta_map[e["id"]]["published"]) if e["id"] in meta_map and meta_map[e["id"]]["published"] else 0.0
-        published_ts=published_raw if (t - 86400 * 30 <= published_raw <= t + 7200) else float(e["last_seen"] or 0)
-        latest=max(published_ts,float(e["last_seen"] or 0))
+        # latest_score: use the article's actual pub_ts for sorting the Latest tab.
+        # This is the MAX published timestamp across all linked articles (from meta_map["published"]).
+        # last_seen is now always current-ingest-time, so it's not useful for article pub ordering.
+        # We use MAX(article published) as the authoritative "when did this event last have new info".
+        m=meta_map.get(e["id"])
+        article_pub_raw=float(m["published"]) if m and m["published"] else 0.0
+        article_pub_ts=article_pub_raw if (t - 86400 * 30 <= article_pub_raw <= t + 7200) else 0.0
+        # latest_score is based purely on article publication time so Latest tab is CHRONOLOGICAL by article.
+        latest=article_pub_ts if article_pub_ts > 0 else float(e["last_seen"] or 0)
         moving=(float(e["velocity"] or 0)*.60+freshness*.25+float(e["novelty"] or 0)*.15)*recency_mult
         flash=(.34*float(e["urgency"] or 0)+.24*float(e["velocity"] or 0)+.18*freshness+.14*float(e["significance"] or 0)+.06*float(e["authority"] or 0)+.04*float(e["corroboration"] or 0))*recency_mult
         obj=_serialize_event(e,meta_map,base)
@@ -2164,9 +2222,34 @@ def maybe_sync_sources():
 def schedule_due_sources():
     maybe_sync_sources()
     with DB_LOCK:
-        con=db(); src=[dict(r) for r in con.execute("SELECT * FROM sources WHERE enabled=1").fetchall()]; con.close()
+        con=db()
+        src=[dict(r) for r in con.execute("SELECT * FROM sources WHERE enabled=1").fetchall()]
+        # STALL RECOVERY: any source stuck in "fetching" state for >3x FEED_TIMEOUT has likely
+        # lost its thread callback. Reset it to "idle" so it gets re-queued on the next scan.
+        stall_threshold = t_now = now()
+        stall_cutoff = stall_threshold - max(FEED_TIMEOUT * 4, 60.0)
+        try:
+            stalled_count = con.execute(
+                "UPDATE sources SET state='idle',last_error='stall-recovery',updated_at=? "
+                "WHERE state='fetching' AND last_attempt<? AND enabled=1",
+                (t_now, stall_cutoff)).rowcount
+            if stalled_count:
+                print(f"[STALL-RECOVERY] Reset {stalled_count} stalled sources to idle", flush=True)
+        except Exception as exc:
+            print(f"[STALL-RECOVERY] {type(exc).__name__}: {str(exc)[:120]}", flush=True)
+        con.commit(); con.close()
     t=now(); src.sort(key=lambda s:(0 if s.get("tier")=="official" else 1 if s.get("tier")=="publisher" else 2,s.get("last_success") or 0))
+    # Also evict source IDs from SOURCE_INFLIGHT if they have been there too long
+    # (defensive measure in case a future callback is dropped by the executor)
+    with SOURCE_INFLIGHT_LOCK:
+        stale_ids=[sid for sid in list(SOURCE_INFLIGHT) if not any(s["id"]==sid for s in src)]
+        for sid in stale_ids:
+            SOURCE_INFLIGHT.discard(sid)
     submitted=0
+    # Limit concurrent discovery fetches to prevent them from starving publisher threads
+    with SOURCE_INFLIGHT_LOCK:
+        discovery_inflight=sum(1 for sid in SOURCE_INFLIGHT if any(s["id"]==sid and s.get("tier")=="discovery" for s in src))
+    max_discovery_concurrent=max(4, MAX_WORKERS // 4)
     discovery_stagger=0.0
     for s in src:
         sid=s["id"]
@@ -2176,6 +2259,10 @@ def schedule_due_sources():
             if next_attempt>0 and t<next_attempt: continue
             last=max(s.get("last_success") or 0,s.get("last_failure") or 0); interval=max(45,int(s.get("interval_sec") or 120))
             if t-last<interval: continue
+            # Throttle discovery tier to avoid starving publisher/official sources
+            if s.get("tier")=="discovery":
+                discovery_inflight_now=sum(1 for x in SOURCE_INFLIGHT if any(ss["id"]==x and ss.get("tier")=="discovery" for ss in src))
+                if discovery_inflight_now>=max_discovery_concurrent: continue
             SOURCE_INFLIGHT.add(sid)
         try:
             if s.get("tier")=="discovery":
