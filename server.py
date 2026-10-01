@@ -1342,7 +1342,8 @@ def build_enriched():
                     MAX(CASE WHEN a.id=e.primary_article_id THEN a.canonical_url END) primary_url,
                     MAX(CASE WHEN a.id=e.primary_article_id THEN a.domain END) primary_domain,
                     MAX(CASE WHEN a.id=e.primary_article_id THEN a.image_url END) image_url,
-                    MAX(CASE WHEN a.id=e.primary_article_id THEN a.published END) published,
+                    MAX(CASE WHEN a.id=e.primary_article_id THEN a.published END) primary_published,
+                    MAX(a.published) published,
                     MAX(CASE WHEN a.id=e.primary_article_id THEN a.description END) description,
                     GROUP_CONCAT(DISTINCT a.domain) domains,
                     GROUP_CONCAT(DISTINCT a.language) languages,
@@ -1843,11 +1844,12 @@ def build_home_payload(enriched, ranked_latest, important_objs, impact_objs, fut
     used=set()
     flash_ids={o["id"] for o in flash_objs}
     def _stack_score(x):
-        """Recency-first score for the Story Stack.
+        """Recency-first score for the Story Stack based on actual article publication date.
         Stories from the last 8h get a strong time-decay boost; older stories
         are progressively discounted so stale content cannot block fresh breaking news."""
         o=x["obj"]
-        age_h=max(0.0,(now_ts-float(o.get("last_seen") or now_ts))/3600.0)
+        pub_time=float(o.get("published") or o.get("last_seen") or now_ts)
+        age_h=max(0.0,(now_ts-pub_time)/3600.0)
         # Exponential recency multiplier: 8h → 1.0, 24h → 0.50, 48h → 0.20, 72h → 0.08
         if age_h<=8.0:
             recency=1.0
@@ -1865,8 +1867,8 @@ def build_home_payload(enriched, ranked_latest, important_objs, impact_objs, fut
         # Blend: 55% recency-freshness, 20% editorial quality, 15% india, 10% velocity
         return recency*(freshness*0.55 + editorial*0.20 + india*0.15 + velocity*0.10)
 
-    # Stack candidates: prefer events seen in the last 36h; fall back to all if fewer than 4
-    fresh_editorial=[x for x in enriched if x["obj"]["id"] not in flash_ids and max(0.0,(now_ts-float(x["obj"].get("last_seen") or now_ts))/3600.0)<=36.0]
+    # Stack candidates: prefer events published in the last 36h; fall back to all if fewer than 4
+    fresh_editorial=[x for x in enriched if x["obj"]["id"] not in flash_ids and max(0.0,(now_ts-float(x["obj"].get("published") or x["obj"].get("last_seen") or now_ts))/3600.0)<=36.0]
     editorial_candidates=fresh_editorial if len(fresh_editorial)>=4 else [x for x in enriched if x["obj"]["id"] not in flash_ids]
     editorial_pool=sorted(editorial_candidates, key=_stack_score, reverse=True)
     stack=[x["obj"] for x in editorial_pool[:10]]
@@ -1889,10 +1891,10 @@ def build_home_payload(enriched, ranked_latest, important_objs, impact_objs, fut
         lang_in=bool(set(str(x).lower() for x in (o.get("languages") or [])) & INDIA_LANGUAGES)
         local=o.get("local_relevance",0)>0
         if india_score>=.35 or country_in or lang_in or local or o.get("topic") in {"India","Local"}: india_pool.append(o)
-    # India Now: sort primarily by recency so truly breaking India news surfaces first.
+    # India Now: sort primarily by publication recency so truly breaking India news surfaces first.
     # Secondary sort by india signal and local relevance for diversity.
     india_pool=sorted(india_pool,key=lambda o:(
-        float(o.get("last_seen") or 0)*0.70
+        float(o.get("published") or o.get("last_seen") or 0)*0.70
         +float((o.get("signals") or {}).get("india") or 0)*3600.0*8.0*0.20
         +float(o.get("local_relevance") or 0)*3600.0*8.0*0.10
     ),reverse=True)
