@@ -165,7 +165,7 @@ CLUSTER_MIN_RARE_DF = int(os.environ.get("AETHERIA_CLUSTER_MIN_RARE_DF", "8"))
 FUTURE_CACHE_SECONDS = float(os.environ.get("AETHERIA_FUTURE_CACHE_SECONDS", "45"))
 FUTURE_CACHE_LOCK = threading.Lock()
 FUTURE_CACHE = {"at": 0.0, "value": []}
-MARKET_POLL_SECONDS = float(os.environ.get("AETHERIA_MARKET_POLL_SECONDS", "120"))
+MARKET_POLL_SECONDS = float(os.environ.get("AETHERIA_MARKET_POLL_SECONDS", "30"))
 MARKET_CACHE_LOCK = threading.Lock()
 MARKET_CACHE = {"at": 0.0, "status": "warming", "groups": []}
 MARKET_REFRESH_INFLIGHT = False
@@ -1479,9 +1479,10 @@ def _market_json(url, timeout=5):
 
 
 def _yahoo_quote(symbol):
-    url="https://query1.finance.yahoo.com/v8/finance/chart/"+urllib.parse.quote(symbol,safe="")+"?range=1d&interval=5m&includePrePost=false"
+    url="https://query1.finance.yahoo.com/v8/finance/chart/"+urllib.parse.quote(symbol,safe="")+"?range=1d&interval=15m&includePrePost=false"
     data=_market_json(url,timeout=5)
-    meta=((data.get("chart") or {}).get("result") or [{}])[0].get("meta") or {}
+    res=((data.get("chart") or {}).get("result") or [{}])[0]
+    meta=res.get("meta") or {}
     price=meta.get("regularMarketPrice")
     prev=meta.get("previousClose")
     if price is None: raise ValueError("price unavailable")
@@ -1490,7 +1491,15 @@ def _yahoo_quote(symbol):
     if prev not in (None,0):
         change_num=round(float(price)-float(prev),2)
         change=change_num/float(prev)
-    return {"symbol":symbol,"price":float(price),"change":change,"change_num":change_num,"previous_close":float(prev) if prev is not None else None,"currency":meta.get("currency") or "","at":float(meta.get("regularMarketTime") or now())}
+    # Extract intraday sparkline points
+    sparkline=[]
+    try:
+        quote_indicators=((res.get("indicators") or {}).get("quote") or [{}])[0]
+        closes=quote_indicators.get("close") or []
+        sparkline=[round(float(v),2) for v in closes if v is not None][-20:]
+    except Exception:
+        sparkline=[]
+    return {"symbol":symbol,"price":float(price),"change":change,"change_num":change_num,"previous_close":float(prev) if prev is not None else None,"sparkline":sparkline,"currency":meta.get("currency") or "","at":float(meta.get("regularMarketTime") or now())}
 
 
 def _frankfurter_rates():

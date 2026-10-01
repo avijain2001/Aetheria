@@ -136,6 +136,19 @@ function stackCard(e,pos,originalIndex){
     :(e.life_impact||e.why_matters||e.india_lens_reasons||[]).slice(0,2).join(' · ')||'Observed story activity across the source set.';
   return`<article class="stack-card ${active?'active':''}" data-stack="${originalIndex}" style="--pos:${layer};--z:${100-layer};--opacity:${active?1:Math.max(.24,1-layer*.08)}"><div class="stack-copy"><div class="stack-kicker"><span class="status-dot"></span>${trustChip(e)}<em>${esc(e.topic||'WORLD')}</em><time>${age(e.published||e.last_seen)}</time></div><h2>${articleAnchor(e)}</h2>${e.description?`<p class="lead-summary">${esc(e.description)}</p>`:''}<p class="stack-evidence-text">${esc(evidenceLine)}${impLine?` · ${impLine}`:''}</p>${whyText?`<div class="stack-why"><span>Why it matters</span><span>${esc(whyText)}</span></div>`:''}<div class="stack-ai"><b>${contextLabel}</b><span>${esc(contextText)}</span></div><div class="lead-actions">${validUrl(e?.url)?`<a class="read-btn" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">Read original ↗</a>`:`<span class="read-btn disabled">Original unavailable</span>`}<span class="source-chip">${esc(sourceLine(e))}${srcCount>1?` · ${srcCount} sources`:''}</span></div></div>${imageBlock(e,'stack-media',active?'eager':'lazy')} </article>`;
 }
+function renderSparklineSvg(points, isUp){
+  if(!Array.isArray(points)||points.length<2)return'';
+  const min=Math.min(...points), max=Math.max(...points), range=max-min||1;
+  const w=64, h=22;
+  const coords=points.map((p,i)=>{
+    const x=(i/(points.length-1))*w;
+    const y=h-((p-min)/range)*(h-4)-2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const strokeColor=isUp?'#22c55e':'#ef4444';
+  return `<svg class="m-sparkline" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><polyline fill="none" stroke="${strokeColor}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" points="${coords}"/></svg>`;
+}
+
 function formatMarket(v,symbol){const n=num(v);if(!n)return'—';if(['USD/INR','EUR/INR','GBP/INR','AED/INR'].includes(String(symbol||'')))return n.toFixed(2);if(String(symbol||'').startsWith('JPY/INR'))return n.toFixed(4);return n.toLocaleString(undefined,{maximumFractionDigits:2})}
 function renderMarket(){
   const tapeEl=$("marketGroups");
@@ -197,8 +210,9 @@ function renderMarket(){
           const changePct = x.change != null ? Number(x.change) * 100 : null;
           let changeText = '—';
           let changeClass = 'flat';
+          let isUp = true;
           if (changePct != null || changeNum != null) {
-            const isUp = (changeNum != null ? changeNum >= 0 : changePct >= 0);
+            isUp = (changeNum != null ? changeNum >= 0 : changePct >= 0);
             changeClass = isUp ? 'up' : 'down';
             const numStr = changeNum != null ? `${isUp ? '+' : ''}${changeNum.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '';
             const pctStr = changePct != null ? `${isUp ? '+' : ''}${changePct.toFixed(2)}%` : '';
@@ -206,7 +220,8 @@ function renderMarket(){
             else if (pctStr) changeText = `${isUp ? '▲' : '▼'} ${pctStr}`;
             else if (numStr) changeText = `${isUp ? '▲' : '▼'} ${numStr}`;
           }
-          return `<div class="market-tape-item"><span class="tape-name">${name}</span><span class="tape-price">${formatMarket(x.price,x.symbol)}</span><span class="tape-badge ${changeClass}">${changeText}</span></div>`;
+          const sparkHtml = renderSparklineSvg(x.sparkline, isUp);
+          return `<div class="market-tape-item"><span class="tape-name">${name}</span>${sparkHtml}<span class="tape-price">${formatMarket(x.price,x.symbol)}</span><span class="tape-badge ${changeClass}">${changeText}</span></div>`;
         }).join('');
       }
     }
@@ -237,8 +252,9 @@ function renderMarket(){
 
       let changeText = '—';
       let changeClass = 'flat';
+      let isUp = true;
       if (changePct != null || changeNum != null) {
-        const isUp = (changeNum != null ? changeNum >= 0 : changePct >= 0);
+        isUp = (changeNum != null ? changeNum >= 0 : changePct >= 0);
         changeClass = isUp ? 'up' : 'down';
         const numStr = changeNum != null ? `${isUp ? '+' : ''}${changeNum.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '';
         const pctStr = changePct != null ? `${isUp ? '+' : ''}${changePct.toFixed(2)}%` : '';
@@ -246,7 +262,8 @@ function renderMarket(){
         else if (pctStr) changeText = `${isUp ? '▲' : '▼'} ${pctStr}`;
         else if (numStr) changeText = `${isUp ? '▲' : '▼'} ${numStr}`;
       }
-      return`<div class="market-card"><div class="m-card-header"><span class="m-card-name">${name}</span><span class="m-card-curr">${curr}</span></div><div class="m-card-body"><strong class="m-card-price">${formatMarket(x.price,x.symbol)}</strong><span class="m-card-badge ${changeClass}">${changeText}</span></div></div>`;
+      const sparkHtml = renderSparklineSvg(x.sparkline, isUp);
+      return`<div class="market-card"><div class="m-card-header"><span class="m-card-name">${name}</span><span class="m-card-curr">${curr}</span></div><div class="m-card-body">${sparkHtml}<div class="m-card-right"><strong class="m-card-price">${formatMarket(x.price,x.symbol)}</strong><span class="m-card-badge ${changeClass}">${changeText}</span></div></div></div>`;
     }).join('');
 
     deskContainer.innerHTML=`
