@@ -50,12 +50,12 @@ SNAPSHOT_SECONDS = float(os.environ.get("AETHERIA_SNAPSHOT_SECONDS", "2.0"))
 LEARNING_SECONDS = int(os.environ.get("AETHERIA_LEARNING_SECONDS", "300"))
 TELEMETRY_FLUSH_SECONDS = float(os.environ.get("AETHERIA_TELEMETRY_FLUSH_SECONDS", "3"))
 MAX_WORKERS = int(os.environ.get("AETHERIA_WORKERS", "32"))
-FEED_TIMEOUT = float(os.environ.get("AETHERIA_FEED_TIMEOUT", "4.5"))
-GDELT_TIMEOUT = float(os.environ.get("AETHERIA_GDELT_TIMEOUT", "4.5"))
+FEED_TIMEOUT = float(os.environ.get("AETHERIA_FEED_TIMEOUT", "8.0"))
+GDELT_TIMEOUT = float(os.environ.get("AETHERIA_GDELT_TIMEOUT", "12.0"))
 MAX_ITEMS_PER_SOURCE = int(os.environ.get("AETHERIA_MAX_ITEMS_PER_SOURCE", "150"))
 MAX_DISCOVERY_ITEMS = int(os.environ.get("AETHERIA_MAX_DISCOVERY_ITEMS", "300"))
 MAX_RESPONSE_BYTES = int(os.environ.get("AETHERIA_MAX_RESPONSE_BYTES", str(8 * 1024 * 1024)))
-CONNECT_TIMEOUT = float(os.environ.get("AETHERIA_CONNECT_TIMEOUT", "2.5"))
+CONNECT_TIMEOUT = float(os.environ.get("AETHERIA_CONNECT_TIMEOUT", "6.0"))
 RETENTION_DAYS = int(os.environ.get("AETHERIA_RETENTION_DAYS", "30"))
 EVENT_ACTIVE_HOURS = float(os.environ.get("AETHERIA_EVENT_ACTIVE_HOURS", "72"))
 EVENT_POOL_LIMIT = int(os.environ.get("AETHERIA_EVENT_POOL_LIMIT", "5000"))
@@ -261,6 +261,10 @@ def init_db():
         ensure_column(con,"sources","region","TEXT")
         ensure_column(con,"sources","city","TEXT")
         ensure_column(con,"sources","state_name","TEXT")
+        ensure_column(con,"sources","consecutive_failures","INTEGER DEFAULT 0")
+        ensure_column(con,"sources","last_http_status","INTEGER DEFAULT 0")
+        ensure_column(con,"sources","next_attempt_at","REAL DEFAULT 0")
+        ensure_column(con,"sources","error_class","TEXT DEFAULT ''")
         ensure_column(con,"ai_context","why","TEXT")
         ensure_column(con,"ai_context","uncertainty","TEXT")
         ensure_column(con,"ai_context","evidence_note","TEXT")
@@ -296,22 +300,32 @@ def canonical_url(url: str) -> str:
 
 def parse_date(value) -> float | None:
     if value is None: return None
+    ts = None
     if isinstance(value,(int,float)):
-        return float(value)/1000 if value > 10_000_000_000 else float(value)
-    value = clean_text(str(value))
-    if not value: return None
-    for v in (value,value.replace("Z","+00:00")):
-        try:
-            dt = datetime.fromisoformat(v)
-            if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
-            return dt.timestamp()
-        except Exception: pass
-    for fmt in ("%a, %d %b %Y %H:%M:%S %z","%a, %d %b %Y %H:%M:%S GMT","%Y%m%d%H%M%S","%Y-%m-%d %H:%M:%S"):
-        try:
-            dt = datetime.strptime(value,fmt)
-            if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
-            return dt.timestamp()
-        except Exception: pass
+        ts = float(value)/1000 if value > 10_000_000_000 else float(value)
+    else:
+        v_str = clean_text(str(value))
+        if not v_str: return None
+        for v in (v_str, v_str.replace("Z","+00:00")):
+            try:
+                dt = datetime.fromisoformat(v)
+                if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
+                ts = dt.timestamp()
+                break
+            except Exception: pass
+        if ts is None:
+            for fmt in ("%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S GMT", "%a, %d %b %Y %H:%M:%S", "%Y%m%d%H%M%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+                try:
+                    dt = datetime.strptime(v_str, fmt)
+                    if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
+                    ts = dt.timestamp()
+                    break
+                except Exception: pass
+    if ts is not None:
+        t_curr = now()
+        if ts > t_curr + 86400 or ts < 946684800:
+            return None
+        return ts
     return None
 
 
@@ -651,7 +665,21 @@ def source_item_limit(source):
 
 
 def parse_feed(raw: bytes, source):
-    root=ET.fromstring(raw); out=[]; limit=source_item_limit(source)
+    if not raw or not raw.strip():
+        raise ValueError("empty feed document")
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as pe:
+        try:
+            cleaned = raw.decode("utf-8", errors="replace").strip()
+            if "<" in cleaned:
+                cleaned = cleaned[cleaned.index("<"):]
+            root = ET.fromstring(cleaned.encode("utf-8"))
+        except Exception:
+            raise ValueError(f"invalid XML: {str(pe)[:140]}")
+    except Exception as exc:
+        raise ValueError(f"invalid XML: {str(exc)[:140]}")
+    out = []; limit = source_item_limit(source)
     nodes=[]
     for node in root.iter():
         tag=node.tag.split("}")[-1].lower()
@@ -807,6 +835,23 @@ def parse_schedule(raw, source):
     return []
 
 
+def classify_error(err_str: str) -> tuple[str, int]:
+    err = (err_str or "").lower()
+    if "429" in err or "rate" in err or "too many requests" in err:
+        return "RATE_LIMITED", 429
+    if "404" in err or "not found" in err:
+        return "NOT_FOUND", 404
+    if "timeout" in err or "timed out" in err or "deadline" in err:
+        return "TIMEOUT", 408
+    if "dns" in err or "name or service not known" in err or "could not resolve host" in err:
+        return "DNS_ERROR", 502
+    if "xml" in err or "element" in err or "parse" in err or "not well-formed" in err:
+        return "INVALID_FEED", 422
+    if any(code in err for code in ("500", "502", "503", "504")):
+        return "UNAVAILABLE", 500
+    return "DEGRADED", 500
+
+
 def set_source_state(sid,state,error=None,started=None):
     with DB_LOCK:
         con=db(); con.execute("UPDATE sources SET state=?,last_attempt=?,last_error=?,updated_at=? WHERE id=?",(state,started or now(),error,now(),sid)); con.commit(); con.close()
@@ -814,18 +859,21 @@ def set_source_state(sid,state,error=None,started=None):
 
 def fetch_source(source):
     sid=source["id"]; started=now(); set_source_state(sid,"fetching",None,started)
+    url=source["url"]
+    if url.startswith("https://api.gdeltproject.org/"):
+        url=url.replace("https://api.gdeltproject.org/", "http://api.gdeltproject.org/")
     try:
         timeout=GDELT_TIMEOUT if str(source.get("provider","")).lower()=="gdelt" else FEED_TIMEOUT
-        status,raw,headers=request_bytes(source["url"],source.get("etag"),source.get("last_modified"),timeout)
+        status,raw,headers=request_bytes(url,source.get("etag"),source.get("last_modified"),timeout)
+        duration=int((now()-started)*1000)
         if status==304:
-            duration=int((now()-started)*1000)
             with DB_LOCK:
-                con=db(); con.execute("UPDATE sources SET state='online',last_success=?,last_duration_ms=?,failures=0,last_error=NULL,updated_at=? WHERE id=?",(now(),duration,now(),sid)); con.commit(); con.close()
+                con=db(); con.execute("UPDATE sources SET state='online',last_success=?,last_duration_ms=?,failures=0,consecutive_failures=0,last_error=NULL,last_http_status=304,error_class='',next_attempt_at=0,updated_at=? WHERE id=?",(now(),duration,now(),sid)); con.commit(); con.close()
             return [],{"id":sid,"name":source["name"],"ok":True,"not_modified":True,"items":0,"ms":duration,"tier":source.get("tier","publisher")}
         if source.get("format") in ("ics","fomc_html"):
             count=schedule_import(source,parse_schedule(raw,source)); duration=int((now()-started)*1000)
             with DB_LOCK:
-                con=db(); con.execute("UPDATE sources SET etag=?,last_modified=?,last_success=?,failures=0,fetched=fetched+1,items=items+?,state='online',last_duration_ms=?,last_error=NULL,updated_at=? WHERE id=?",(headers.get("etag") if isinstance(headers,dict) else None,headers.get("last-modified") if isinstance(headers,dict) else None,now(),count,duration,now(),sid)); con.commit(); con.close()
+                con=db(); con.execute("UPDATE sources SET etag=?,last_modified=?,last_success=?,failures=0,consecutive_failures=0,fetched=fetched+1,items=items+?,state='online',last_duration_ms=?,last_error=NULL,last_http_status=200,error_class='',next_attempt_at=0,updated_at=? WHERE id=?",(headers.get("etag") if isinstance(headers,dict) else None,headers.get("last-modified") if isinstance(headers,dict) else None,now(),count,duration,now(),sid)); con.commit(); con.close()
             return [],{"id":sid,"name":source["name"],"ok":True,"items":count,"schedules":count,"ms":duration,"tier":"official"}
         if source.get("format")=="geojson":
             data=json.loads(raw.decode("utf-8",errors="replace")); items=[]
@@ -836,13 +884,26 @@ def fetch_source(source):
             items=parse_feed(raw,source)
         hdr={k.lower():v for k,v in headers.items()}; duration=int((now()-started)*1000)
         with DB_LOCK:
-            con=db(); con.execute("UPDATE sources SET etag=?,last_modified=?,last_success=?,failures=0,fetched=fetched+1,items=items+?,state='online',last_duration_ms=?,last_error=NULL,updated_at=? WHERE id=?",(hdr.get("etag"),hdr.get("last-modified"),now(),len(items),duration,now(),sid)); con.commit(); con.close()
+            con=db(); con.execute("UPDATE sources SET etag=?,last_modified=?,last_success=?,failures=0,consecutive_failures=0,fetched=fetched+1,items=items+?,state='online',last_duration_ms=?,last_error=NULL,last_http_status=200,error_class='',next_attempt_at=0,updated_at=? WHERE id=?",(hdr.get("etag"),hdr.get("last-modified"),now(),len(items),duration,now(),sid)); con.commit(); con.close()
         return items,{"id":sid,"name":source["name"],"ok":True,"items":len(items),"ms":duration,"tier":source.get("tier","publisher")}
     except Exception as exc:
         duration=int((now()-started)*1000); err=str(exc)[:240]
+        error_class, http_status = classify_error(err)
+        base_interval = max(45, int(source.get("interval_sec") or 120))
+        prev_failures = int(source.get("consecutive_failures") or source.get("failures") or 0) + 1
+        if error_class == "RATE_LIMITED":
+            backoff_delay = max(300, base_interval * 3)
+        elif error_class == "NOT_FOUND":
+            backoff_delay = max(600, base_interval * 4)
+        elif error_class == "DNS_ERROR":
+            backoff_delay = max(180, base_interval * 2)
+        else:
+            mult = min(16, 2 ** min(prev_failures, 4))
+            backoff_delay = base_interval * mult
+        next_attempt_at = now() + backoff_delay
         with DB_LOCK:
-            con=db(); con.execute("UPDATE sources SET state='error',last_failure=?,failures=failures+1,last_duration_ms=?,last_error=?,updated_at=? WHERE id=?",(now(),duration,err,now(),sid)); con.commit(); con.close()
-        return [],{"id":sid,"name":source["name"],"ok":False,"items":0,"ms":duration,"tier":source.get("tier","publisher"),"error":err}
+            con=db(); con.execute("UPDATE sources SET state='error',last_failure=?,failures=failures+1,consecutive_failures=COALESCE(consecutive_failures,0)+1,last_duration_ms=?,last_error=?,last_http_status=?,error_class=?,next_attempt_at=?,updated_at=? WHERE id=?",(now(),duration,err,http_status,error_class,next_attempt_at,now(),sid)); con.commit(); con.close()
+        return [],{"id":sid,"name":source["name"],"ok":False,"items":0,"ms":duration,"tier":source.get("tier","publisher"),"error":err,"error_class":error_class}
 
 
 def _refresh_fts_for_event(con,event_id):
@@ -1111,12 +1172,15 @@ def ingest(items):
         for aid,a in fresh:
             cands=_candidate_events_from_index(a,local_index,df,n,local_postings,local_entity_postings,local_by_id)
             article_terms=content_tokens(a["title"]+" "+a.get("description", ""))
+            pub_ts = a.get("published")
+            art_seen = pub_ts if (pub_ts and pub_ts > t - 7 * 86400) else t
             if cands:
                 event_id=cands[0][1]; change="UPDATE"
                 # Let the in-batch event representation evolve so subsequent
                 # matching uses newly observed vocabulary without a DB reread.
                 ev=local_by_id.get(event_id)
                 if ev is not None:
+                    ev["last_seen"]=max(float(ev.get("last_seen") or 0), art_seen)
                     before=set(ev.get("tokens_content") or ev.get("tokens") or set())
                     ev.setdefault("tokens_content",set()).update(article_terms)
                     ev.setdefault("tokens",set()).update(article_terms)
@@ -1128,18 +1192,20 @@ def ingest(items):
                     for tok in article_terms: local_postings.setdefault(tok,set()).add(event_id)
                     for ent in new_entities: local_entity_postings.setdefault(str(ent).lower(),set()).add(event_id)
             else:
-                event_id=stable_id("evt",a["url"]+"|"+str(int((a.get("published") or t)/3600))); change="NEW"
-                ents=extract_entities(a["title"]); tpc=a.get("topic","World"); seen=a.get("published") or t
-                con.execute("INSERT OR IGNORE INTO events(id,title,topic,status,first_seen,last_seen,last_change,primary_article_id,entities,locations,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(event_id,a["title"],tpc,"NEW",seen,seen,now(),aid,json.dumps(ents),json.dumps(ents),now(),now()))
-                new_ev={"id":event_id,"title":a["title"],"topic":tpc,"last_seen":seen,"tokens":set(article_terms),"tokens_content":set(article_terms),"signatures":[set(article_terms)],"entities":set(ents),"source_ids":{a.get("source_id","")},"domains":{a.get("domain","")}}
+                event_id=stable_id("evt",a["url"]+"|"+str(int((pub_ts or t)/3600))); change="NEW"
+                ents=extract_entities(a["title"]); tpc=a.get("topic","World"); first_seen_ts=pub_ts or t
+                con.execute("""INSERT INTO events(id,title,topic,status,first_seen,last_seen,last_change,primary_article_id,entities,locations,created_at,updated_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET last_seen=MAX(events.last_seen, excluded.last_seen), last_change=excluded.last_change, updated_at=excluded.updated_at""",
+                    (event_id,a["title"],tpc,"NEW",first_seen_ts,art_seen,t,aid,json.dumps(ents),json.dumps(ents),t,t))
+                new_ev={"id":event_id,"title":a["title"],"topic":tpc,"last_seen":art_seen,"tokens":set(article_terms),"tokens_content":set(article_terms),"signatures":[set(article_terms)],"entities":set(ents),"source_ids":{a.get("source_id","")},"domains":{a.get("domain","")}}
                 local_index.append(new_ev); local_by_id[event_id]=new_ev
                 for tok in article_terms: df[tok]=df.get(tok,0)+1; local_postings.setdefault(tok,set()).add(event_id)
                 for ent in ents: local_entity_postings.setdefault(str(ent).lower(),set()).add(event_id)
                 n += 1
             if not con.execute("SELECT 1 FROM event_articles WHERE event_id=? AND article_id=?",(event_id,aid)).fetchone():
-                con.execute("INSERT INTO event_articles(event_id,article_id,first_linked) VALUES(?,?,?)",(event_id,aid,now()))
-                con.execute("INSERT INTO event_updates(event_id,article_id,observed_at,change_type,note) VALUES(?,?,?,?,?)",(event_id,aid,now(),change,a["title"][:240]))
-                con.execute("UPDATE events SET last_seen=?,last_change=?,primary_article_id=COALESCE(primary_article_id,?) WHERE id=?",(a.get("published") or t,now(),aid,event_id))
+                con.execute("INSERT INTO event_articles(event_id,article_id,first_linked) VALUES(?,?,?)",(event_id,aid,t))
+                con.execute("INSERT INTO event_updates(event_id,article_id,observed_at,change_type,note) VALUES(?,?,?,?,?)",(event_id,aid,t,change,a["title"][:240]))
+                con.execute("UPDATE events SET last_seen=MAX(last_seen, ?),last_change=?,primary_article_id=COALESCE(primary_article_id,?) WHERE id=?",(art_seen,t,aid,event_id))
             affected.add(event_id)
         for eid in affected: _recalc_event_con(con,eid,t)
         con.execute("INSERT OR REPLACE INTO system_metrics(key,value,updated_at) VALUES('last_ingest',?,?)",(str(t),t))
@@ -1737,9 +1803,33 @@ def rebuild_snapshot():
     latest_diverse.sort(key=lambda x:(x["latest_score"],x["flash_score"]),reverse=True)
     latest_lane_objs = [x["obj"] for x in latest_diverse]
 
+    t_now = now()
+    latest_article_pub = max((float(o.get("published") or 0) for o in all_objs if o.get("published")), default=0.0)
+    latest_event_seen = max((float(o.get("last_seen") or 0) for o in all_objs if o.get("last_seen")), default=0.0)
+    freshest_age = round(max(0.0, t_now - latest_event_seen), 1) if latest_event_seen > 0 else 0.0
+
     with SNAPSHOT_LOCK:
         rev=SNAPSHOT.get("revision",0)+1
-        SNAPSHOT={"revision":rev,"built_at":now(),"events":all_objs,"flash":flash_objs,"important":important_objs,"impact":impact_objs,"latest":latest_lane_objs,"moving":moving_objs,"sections":sections,"categories":cats,"future":future,"market":market_snapshot,"home":home,"state":state}
+        SNAPSHOT={
+            "revision":rev,
+            "built_at":t_now,
+            "latest_article_published_at":latest_article_pub,
+            "latest_event_last_seen":latest_event_seen,
+            "freshest_event_age_seconds":freshest_age,
+            "events":all_objs,
+            "flash":flash_objs,
+            "important":important_objs,
+            "impact":impact_objs,
+            "latest":latest_lane_objs,
+            "moving":moving_objs,
+            "sections":sections,
+            "categories":cats,
+            "future":future,
+            "market":market_snapshot,
+            "home":home,
+            "state":state
+        }
+    print(f"[SNAPSHOT] Rebuilt revision {rev} | duration={int((now()-t_now)*1000)}ms | events={len(all_objs)} | freshest_event={freshest_age}s ago", flush=True)
     refresh_event_index()
     FEED_INVALIDATED.clear()
 
@@ -1937,31 +2027,92 @@ def source_status():
 
 def diagnostics_payload():
     s=source_status()
+    t=now()
+    con=None
+    art_1h=art_6h=art_24h=0
+    evt_1h=evt_6h=evt_24h=0
+    last_fetch_t=None
+    last_ingest_t=None
+    try:
+        con=db_read()
+        art_1h=con.execute("SELECT COUNT(*) FROM articles WHERE fetched>?",(t-3600,)).fetchone()[0]
+        art_6h=con.execute("SELECT COUNT(*) FROM articles WHERE fetched>?",(t-6*3600,)).fetchone()[0]
+        art_24h=con.execute("SELECT COUNT(*) FROM articles WHERE fetched>?",(t-24*3600,)).fetchone()[0]
+        evt_1h=con.execute("SELECT COUNT(*) FROM events WHERE updated_at>?",(t-3600,)).fetchone()[0]
+        evt_6h=con.execute("SELECT COUNT(*) FROM events WHERE updated_at>?",(t-6*3600,)).fetchone()[0]
+        evt_24h=con.execute("SELECT COUNT(*) FROM events WHERE updated_at>?",(t-24*3600,)).fetchone()[0]
+        last_fetch_row=con.execute("SELECT MAX(last_success) FROM sources").fetchone()
+        last_fetch_t=last_fetch_row[0] if last_fetch_row else None
+        lm=con.execute("SELECT value FROM system_metrics WHERE key='last_ingest'").fetchone()
+        last_ingest_t=float(lm[0]) if lm and lm[0] else None
+    except Exception:
+        pass
+    finally:
+        if con: con.close()
+
     def counts(pool):
-        return {"total":len(pool),
-                "online":sum(1 for r in pool if r["state"]=="online" and r["last_success"] and (not r["last_failure"] or r["last_success"]>=r["last_failure"])),
-                "fetching":sum(1 for r in pool if r["state"]=="fetching"),
-                "errors":sum(1 for r in pool if r["state"]=="error")}
+        return {
+            "total":len(pool),
+            "online":sum(1 for r in pool if r["state"]=="online" and r["last_success"] and (not r["last_failure"] or r["last_success"]>=r["last_failure"])),
+            "fetching":sum(1 for r in pool if r["state"]=="fetching"),
+            "degraded":sum(1 for r in pool if r.get("error_class") in ("DEGRADED","UNAVAILABLE")),
+            "rate_limited":sum(1 for r in pool if r.get("error_class")=="RATE_LIMITED"),
+            "invalid_feed":sum(1 for r in pool if r.get("error_class")=="INVALID_FEED"),
+            "not_found":sum(1 for r in pool if r.get("error_class")=="NOT_FOUND"),
+            "dns_error":sum(1 for r in pool if r.get("error_class")=="DNS_ERROR"),
+            "timeout":sum(1 for r in pool if r.get("error_class")=="TIMEOUT"),
+            "errors":sum(1 for r in pool if r["state"]=="error")
+        }
+
     grouped={tier:counts([r for r in s if r["tier"]==tier]) for tier in ("publisher","discovery","official")}
-    return {"ok":True,"sources":counts(s),"feed":grouped["publisher"],"discovery":grouped["discovery"],"official":grouped["official"],
-            "last_success_source":max((r for r in s if r["last_success"]),key=lambda x:x["last_success"],default=None),
-            "errors":[{"name":r["name"],"state":r["state"],"error":r["last_error"],"ms":r["last_duration_ms"],"failures":r["failures"],"tier":r["tier"],"country":r["country"]} for r in s if r["state"]=="error"][:12]}
+    with SNAPSHOT_LOCK:
+        snap_built_at=SNAPSHOT.get("built_at",0)
+        snap_rev=SNAPSHOT.get("revision",0)
+        freshest_age=SNAPSHOT.get("freshest_event_age_seconds",0)
+
+    return {
+        "ok":True,
+        "freshness":{
+            "articles_1h":int(art_1h),
+            "articles_6h":int(art_6h),
+            "articles_24h":int(art_24h),
+            "events_updated_1h":int(evt_1h),
+            "events_updated_6h":int(evt_6h),
+            "events_updated_24h":int(evt_24h),
+            "last_successful_fetch":datetime.fromtimestamp(last_fetch_t,timezone.utc).isoformat() if last_fetch_t else None,
+            "last_successful_ingest":datetime.fromtimestamp(last_ingest_t,timezone.utc).isoformat() if last_ingest_t else None,
+            "last_snapshot_rebuild":datetime.fromtimestamp(snap_built_at,timezone.utc).isoformat() if snap_built_at else None,
+            "snapshot_revision":snap_rev,
+            "freshest_event_age_seconds":freshest_age
+        },
+        "sources":counts(s),
+        "feed":grouped["publisher"],
+        "discovery":grouped["discovery"],
+        "official":grouped["official"],
+        "last_success_source":max((r for r in s if r["last_success"]),key=lambda x:x["last_success"],default=None),
+        "errors":[{"name":r["name"],"state":r["state"],"error_class":r.get("error_class",""),"error":r["last_error"],"ms":r["last_duration_ms"],"failures":r["failures"],"consecutive_failures":r.get("consecutive_failures",0),"next_attempt_in_sec":round(max(0,(r.get("next_attempt_at") or 0)-t),1),"tier":r["tier"],"country":r["country"]} for r in s if r["state"]=="error"][:20]
+    }
 
 
 
 
 def _source_done(future,source):
     sid=source["id"]
+    sname=source.get("name", sid)
     try:
         items,status=future.result()
         changed=False
+        ingested_n=0
         if items:
-            changed=bool(ingest(items))
+            ingested_n=ingest(items)
+            changed=bool(ingested_n)
         if status.get("schedules"):
             changed=True
         if changed: FEED_INVALIDATED.set()
-    except Exception:
-        pass
+        print(f"[SOURCE] '{sname}' ({source.get('tier','publisher')}) | ok={status.get('ok')} | fetched={len(items or [])} | ingested={ingested_n} | duration={status.get('ms',0)}ms", flush=True)
+    except Exception as exc:
+        err=str(exc)[:200]
+        print(f"[SOURCE ERROR] '{sname}' | {type(exc).__name__}: {err}", flush=True)
     finally:
         with SOURCE_INFLIGHT_LOCK: SOURCE_INFLIGHT.discard(sid)
 
@@ -1983,15 +2134,26 @@ def schedule_due_sources():
         con=db(); src=[dict(r) for r in con.execute("SELECT * FROM sources WHERE enabled=1").fetchall()]; con.close()
     t=now(); src.sort(key=lambda s:(0 if s.get("tier")=="official" else 1 if s.get("tier")=="publisher" else 2,s.get("last_success") or 0))
     submitted=0
+    discovery_stagger=0.0
     for s in src:
         sid=s["id"]
         with SOURCE_INFLIGHT_LOCK:
             if sid in SOURCE_INFLIGHT: continue
+            next_attempt=float(s.get("next_attempt_at") or 0)
+            if next_attempt>0 and t<next_attempt: continue
             last=max(s.get("last_success") or 0,s.get("last_failure") or 0); interval=max(45,int(s.get("interval_sec") or 120))
             if t-last<interval: continue
             SOURCE_INFLIGHT.add(sid)
         try:
-            f=SOURCE_EXECUTOR.submit(fetch_source,s); f.add_done_callback(lambda fut,src=s:_source_done(fut,src)); submitted+=1
+            if s.get("tier")=="discovery":
+                discovery_stagger += 0.5
+                def delayed_fetch(src=s, delay=discovery_stagger):
+                    time.sleep(delay)
+                    return fetch_source(src)
+                f=SOURCE_EXECUTOR.submit(delayed_fetch)
+            else:
+                f=SOURCE_EXECUTOR.submit(fetch_source,s)
+            f.add_done_callback(lambda fut,src=s:_source_done(fut,src)); submitted+=1
         except Exception:
             with SOURCE_INFLIGHT_LOCK: SOURCE_INFLIGHT.discard(sid)
     return submitted
@@ -2003,16 +2165,11 @@ ENGINE_ERROR_LOCK = threading.Lock()
 
 def maintenance_loop():
     global LAST_LEARNING, ENGINE_ERROR, ENGINE_ERROR_AT
-    first=True; last_snapshot=0
+    first=True; last_snapshot=now()
     while not STOP.is_set():
         try:
-            if first:
-                # Build a valid snapshot from any retained DB data before source
-                # fetching begins. This prevents a blank first paint and makes
-                # startup deterministic even when every external source is slow.
-                rebuild_snapshot(); last_snapshot=now()
             submitted=schedule_due_sources()
-            if (not first) and FEED_INVALIDATED.is_set() and now()-last_snapshot>=SNAPSHOT_SECONDS:
+            if FEED_INVALIDATED.is_set() and now()-last_snapshot>=SNAPSHOT_SECONDS:
                 rebuild_snapshot(); last_snapshot=now()
             if first or now()-LAST_LEARNING>=LEARNING_SECONDS:
                 LAST_LEARNING=now(); threading.Thread(target=calibrate_learning,daemon=True,name="aetheria-learning").start()
@@ -2720,7 +2877,24 @@ class Handler(BaseHTTPRequestHandler):
         if path=="/api/diagnostics":
             self.send_json(200,diagnostics_payload(),send_body=send_body); return
         if path=="/api/perf":
-            with SNAPSHOT_LOCK: self.send_json(200,{"ok":True,"version":VERSION,"snapshot_revision":SNAPSHOT.get("revision",0),"snapshot_age_ms":round((now()-SNAPSHOT.get("built_at",now()))*1000,1),"events_cached":len(SNAPSHOT.get("events",[])),"workers":MAX_WORKERS},send_body=send_body); return
+            with SNAPSHOT_LOCK:
+                built_at=SNAPSHOT.get("built_at",now())
+                age_ms=round((now()-built_at)*1000,1)
+                freshest_age=SNAPSHOT.get("freshest_event_age_seconds",0)
+                rev=SNAPSHOT.get("revision",0)
+                latest_pub=SNAPSHOT.get("latest_article_published_at")
+                latest_seen=SNAPSHOT.get("latest_event_last_seen")
+                self.send_json(200,{
+                    "ok":True,
+                    "version":VERSION,
+                    "snapshot_revision":rev,
+                    "snapshot_age_ms":age_ms,
+                    "freshest_event_age_seconds":freshest_age,
+                    "latest_article_published_at":datetime.fromtimestamp(latest_pub,timezone.utc).isoformat() if latest_pub else None,
+                    "latest_event_last_seen":datetime.fromtimestamp(latest_seen,timezone.utc).isoformat() if latest_seen else None,
+                    "events_cached":len(SNAPSHOT.get("events",[])),
+                    "workers":MAX_WORKERS
+                },send_body=send_body); return
         if path=="/api/state":
             self.send_json(200,{"ok":True,"state":system_state()},send_body=send_body); return
         if path=="/api/event/" or path.startswith("/api/event/"):
