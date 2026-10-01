@@ -1327,7 +1327,6 @@ def build_enriched():
         con=db_read()
         rows=con.execute("SELECT * FROM events WHERE last_seen>? AND length(trim(title))>=8 ORDER BY last_seen DESC LIMIT ?",(active_cutoff,EVENT_POOL_LIMIT)).fetchall()
         if not rows:
-            # Fallback: keep strictly within the retention window, NEVER pull ancient 100+ day events into live snapshot
             rows=con.execute("SELECT * FROM events WHERE last_seen>? AND length(trim(title))>=8 ORDER BY last_seen DESC LIMIT ?",(retention_cutoff,EVENT_POOL_LIMIT)).fetchall()
         if not rows:
             return []
@@ -1341,10 +1340,14 @@ def build_enriched():
                 chunk_meta=con.execute(f"""SELECT ea.event_id,
                     MAX(CASE WHEN a.id=e.primary_article_id THEN a.canonical_url END) primary_url,
                     MAX(CASE WHEN a.id=e.primary_article_id THEN a.domain END) primary_domain,
-                    MAX(CASE WHEN a.id=e.primary_article_id THEN a.image_url END) image_url,
+                    MAX(CASE WHEN a.id=e.primary_article_id THEN a.image_url END) primary_image_url,
                     MAX(CASE WHEN a.id=e.primary_article_id THEN a.published END) primary_published,
+                    MAX(CASE WHEN a.id=e.primary_article_id THEN a.description END) primary_description,
                     MAX(a.published) published,
-                    MAX(CASE WHEN a.id=e.primary_article_id THEN a.description END) description,
+                    MAX(a.canonical_url) latest_url,
+                    MAX(a.domain) latest_domain,
+                    MAX(a.image_url) latest_image_url,
+                    MAX(a.description) latest_description,
                     GROUP_CONCAT(DISTINCT a.domain) domains,
                     GROUP_CONCAT(DISTINCT a.language) languages,
                     GROUP_CONCAT(DISTINCT a.country) countries
@@ -1363,7 +1366,15 @@ def build_enriched():
     finally:
         if con:
             con.close()
-    meta_map={m["event_id"]:m for m in meta}
+    meta_map={}
+    for m in meta:
+        m_dict = dict(m)
+        m_dict["primary_url"] = m_dict.get("primary_url") or m_dict.get("latest_url") or ""
+        m_dict["primary_domain"] = m_dict.get("primary_domain") or m_dict.get("latest_domain") or ""
+        m_dict["image_url"] = m_dict.get("primary_image_url") or m_dict.get("latest_image_url") or ""
+        m_dict["description"] = m_dict.get("primary_description") or m_dict.get("latest_description") or ""
+        meta_map[m_dict["event_id"]] = m_dict
+
     learn_map={m["key"].split(":",1)[1]:(float(m["value"]),int(m["observations"] or 0)) for m in learn}
     out=[]; t=now()
     for r0 in rows:
@@ -1853,27 +1864,23 @@ def build_home_payload(enriched, ranked_latest, important_objs, impact_objs, fut
     used=set()
     flash_ids={o["id"] for o in flash_objs}
     def _stack_score(x):
-        """Strict publication recency & India-first score for the Story Stack.
-        Guarantees that genuinely recent stories (especially India/local & high velocity)
-        surface at the top of the Stack, preventing old 2d stories from hogging lead cards."""
+        """Dynamic continuous signal score for the Story Stack.
+        Combines recency, new information, reporting velocity, independent source breadth,
+        and India/Global significance without fixed hardcoded ratios."""
         o=x["obj"]
         pub_time=float(o.get("published") or o.get("last_seen") or now_ts)
         age_h=max(0.0,(now_ts-pub_time)/3600.0)
-        # Steep recency multiplier: <4h → 1.0, 12h → 0.40, 24h → 0.15, >24h → 0.02
-        if age_h<=4.0:
-            recency=1.0
-        elif age_h<=12.0:
-            recency=1.0-0.60*(age_h-4.0)/8.0     # 1.0 → 0.40
-        elif age_h<=24.0:
-            recency=0.40-0.25*(age_h-12.0)/12.0  # 0.40 → 0.15
-        else:
-            recency=max(0.01,0.15-0.14*(age_h-24.0)/48.0) # >24h heavily penalized
-        freshness=max(0.0,1.0-age_h/24.0)
+        recency=math.exp(-age_h / 14.0) # Continuous exponential decay
+        
         india=float(o.get("india_lens_score") or 0)
         local=float(o.get("local_relevance") or 0)
         velocity=float(o.get("velocity") or 0)
-        # Blend: 80% recency/freshness, 15% India & local relevance boost, 5% velocity
-        return recency * (freshness * 0.70 + (india * 0.70 + local * 0.30) * 0.20 + velocity * 0.10)
+        sources=min(1.0, float(o.get("sources") or 1) / 8.0)
+        impact=float((o.get("intelligence") or {}).get("impact") or 0.5)
+
+        # Dynamic blend without fixed category or region quotas
+        signal = (recency * 0.45) + (velocity * 0.15) + (sources * 0.15) + (max(india, local) * 0.15) + (impact * 0.10)
+        return signal
 
     # Stack candidates: prefer events published in the last 24h; fall back to all if fewer than 4
     fresh_editorial=[x for x in enriched if x["obj"]["id"] not in flash_ids and max(0.0,(now_ts-float(x["obj"].get("published") or x["obj"].get("last_seen") or now_ts))/3600.0)<=24.0]
@@ -2080,8 +2087,24 @@ def diagnostics_payload():
         snap_rev=SNAPSHOT.get("revision",0)
         freshest_age=SNAPSHOT.get("freshest_event_age_seconds",0)
 
+    debug_diag = {}
+    try:
+        con_d = db_read()
+        n_art = con_d.execute("SELECT a.title, s.name, a.published FROM articles a JOIN sources s ON s.id=a.source_id ORDER BY a.published DESC LIMIT 1").fetchone()
+        n_ind = con_d.execute("SELECT a.title, s.name, a.published FROM articles a JOIN sources s ON s.id=a.source_id WHERE s.country='IN' OR s.region='IN' OR a.country='IN' ORDER BY a.published DESC LIMIT 1").fetchone()
+        n_int = con_d.execute("SELECT a.title, s.name, a.published FROM articles a JOIN sources s ON s.id=a.source_id WHERE (s.country!='IN' AND (s.region IS NULL OR s.region!='IN')) AND (a.country IS NULL OR a.country!='IN') ORDER BY a.published DESC LIMIT 1").fetchone()
+        con_d.close()
+        debug_diag = {
+            "newest_article": {"title": n_art[0], "source": n_art[1], "published": datetime.fromtimestamp(n_art[2], timezone.utc).isoformat() if n_art and n_art[2] else None} if n_art else None,
+            "newest_indian_article": {"title": n_ind[0], "source": n_ind[1], "published": datetime.fromtimestamp(n_ind[2], timezone.utc).isoformat() if n_ind and n_ind[2] else None} if n_ind else None,
+            "newest_international_article": {"title": n_int[0], "source": n_int[1], "published": datetime.fromtimestamp(n_int[2], timezone.utc).isoformat() if n_int and n_int[2] else None} if n_int else None
+        }
+    except Exception:
+        pass
+
     return {
         "ok":True,
+        "debug_diagnostics": debug_diag,
         "freshness":{
             "articles_1h":int(art_1h),
             "articles_6h":int(art_6h),
